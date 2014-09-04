@@ -1,4 +1,4 @@
-/* $Id: head.S,v 1.13 1998/10/14 20:26:27 ralf Exp $
+/* $Id: head.S,v 1.11 1998/10/18 13:27:12 tsbogend Exp $
  *
  * arch/mips/kernel/head.S
  *
@@ -12,6 +12,7 @@
  * Copyright (C) 1996 Paul M. Antoine
  * Modified for DECStation and hence R3000 support by Paul M. Antoine
  * Further modifications by David S. Miller
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  *
  * Head.S contains the MIPS exception handler and startup code.
  */
@@ -30,6 +31,10 @@
 #include <asm/stackframe.h>
 #include <asm/bootinfo.h>
 #include <asm/cpu.h>
+#include <asm/page.h>
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+#include <linux/tst_dev.h>
+#endif
 
 	.text
 	/*
@@ -65,7 +70,10 @@
 	and	k0, k0, 0xff8
 	addu	k1, k1, k0			# add in offset
 	lw	k0, 0(k1)			# get even pte
-	lw	k1, 4(k1)			# get odd pte
+#ifdef CONFIG_CPU_R5900
+	bltz	k0, 2f				# PTE for SPR
+#endif
+	 lw	k1, 4(k1)			# get odd pte  (delay slot)
 	srl	k0, k0, 6			# convert to entrylo0
 	mtc0	k0, CP0_ENTRYLO0		# load it
 	srl	k1, k1, 6			# convert to entrylo1
@@ -74,9 +82,42 @@
 	 tlbwr					# write random tlb entry
 1:	
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
 	eret					# return from trap
+#ifdef CONFIG_CPU_R5900
+2:		# trampoline code for jump to real TLB refill routine
+	la	k0, except_vec0_ps2_spr
+	jr	k0	
+	 nop					# delay slot
+#endif
 	END(except_vec0_r4000)
 
+/* TLB refill for scratchpad RAM */
+#ifdef CONFIG_CPU_R5900
+	LEAF(except_vec0_ps2_spr)
+	mfc0	k0, CP0_ENTRYHI			# VPN must be 16KB aligned
+	or	k0, k0, (1 << 13)
+	xor	k0, k0, (1 << 13)
+	mtc0	k0, CP0_ENTRYHI
+	li	k0, 0x80000006			# entrylo0: S,D,V
+	mtc0	k0, CP0_ENTRYLO0		# load it
+	li	k1, 0x00000006			# entrylo1:   D,V
+	mtc0	k1, CP0_ENTRYLO1		# load it
+	b	1f
+	 tlbwr					# write random tlb entry
+1:	
+	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
+	eret					# return from trap
+	END(except_vec0_ps2_spr)
+#endif	/* CONFIG_CPU_R5900 */
+
+
+#if !defined(CONFIG_CPU_R5900)
 	/* TLB refill, EXL == 0, R4600 version */
 	LEAF(except_vec0_r4600)
 	.set	mips3
@@ -191,7 +232,7 @@
 	nop
 	eret
 	END(except_vec0_r4k_mphwbug)
-#endif
+#endif /* __SMP__ */
 
 	/* TLB refill, EXL == 0, R4000 UP 250MHZ entrylo[01] hwbug version */
 	LEAF(except_vec0_r4k_250MHZhwbug)
@@ -254,7 +295,7 @@
 	nop
 	eret
 	END(except_vec0_r4k_MP250MHZhwbug)
-#endif
+#endif /* __SMP__ */
 
 	/* TLB refill, EXL == 0, R[23]00 version */
 	LEAF(except_vec0_r2300)
@@ -277,12 +318,19 @@
 	tlbwr
 	nop
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	move	k0,k1
+	li	k1, _TST_ACCESS_MAGIC
+	jr	k0
+	rfe
+#else
 	nop
 	nop
 	jr	k1
 	rfe
 	END(except_vec0_r2300)
-
+#endif
+#endif /* !CONFIG_CPU_R5900 */
 
 	/* XTLB refill, EXL == 0, R4xx0 cpus only use this... */
 	NESTED(except_vec1_generic, 0, sp)
@@ -304,11 +352,16 @@
 	nop				# Needed for R4[04]00 pipeline
 	nop
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
 	eret
 	nop				/* Workaround for R4000 bug. */
 	eret
 	END(except_vec1_generic)
 
+
+#if !defined(CONFIG_CPU_R5900)
 	/* Cache Error */
 	LEAF(except_vec2_generic)
 	/* Famous last words: unreached */
@@ -366,6 +419,7 @@ handle_vcei:
 	eret
 
 	END(except_vec3_r4000)
+#endif /* ! CONFIG_CPU_R5900 */
 	.set	at
 
 	/* General exception vector. */
@@ -408,15 +462,34 @@ NESTED(kernel_entry, 16, sp)
 
 probe_done:
 
-#ifndef CONFIG_SGI
-	/* Get the memory upper limit the bootloader passed to us
-	 * in a0
+#ifdef CONFIG_CPU_R5900
+	/*
+	 *************************************************************
+	 * NOTE: EE#2.9 is the first revision released to the public.*
+	 * So, blow codes are needless for released PS2 or T10000.   *
+	 *************************************************************
+	 *
+	 * Disable branch prediction for EE#2.5 or predcessor,
+	 * due to miss-prediction of branch targets for short-loop. 
+	 * Now compiler produces propper codes for EE#2.9 or successor,
+	 * but EE#2.5 would miss-predict even if with that compiler.
 	 */
-	la	t0, mips_memory_upper
-	nop
-	sw	a0, (t0)		
-#else
-	/* On SGI's the firmware/bootloader passes argc/argp/envp
+	
+	mfc0	t0, CP0_PRID
+	andi	t0, 0xff
+	bgt	t0, 0x13, 1f		/* 0x13: EE#2.5 */
+	mfc0	t0, CP0_CONFIG
+	lui	t1, %hi(~ CONF_R5900_BPE)
+	ori	t1, t1, %lo(~ CONF_R5900_BPE)
+	and	t0,t0,t1
+	mtc0	t0, CP0_CONFIG
+	sync.p
+     1:
+#endif
+#ifdef CONFIG_CPU_R5900
+	li	sp, 0x82000000 - 1024*1024*2	/* 30M */
+#endif
+	/* The firmware/bootloader passes argc/argp/envp
 	 * to us as arguments.  But clear bss first because
 	 * the romvec and other important info is stored there
 	 * by prom_init().
@@ -425,12 +498,24 @@ probe_done:
 	sw	zero, (t0)
 	la	t1, (_end - 4)
 1:
+#ifdef CONFIG_CPU_R5900 /* inhibit short loop */
+	addiu	t0, 4
+	beq	t0, t1, 2f
+	 sw	zero, (t0)
 	addiu	t0, 4
 	bne	t0, t1, 1b
 	 sw	zero, (t0)
+2:
+#else
+	addiu	t0, 4
+	bne	t0, t1, 1b
+	 sw	zero, (t0)
+#endif
 
 	jal	prom_init /* prom_init(argc, argv, envp); */
 	 nop
+
+#ifdef CONFIG_SGI
 	jal	sgi_sysinit
 	 nop
 #endif
@@ -440,18 +525,6 @@ probe_done:
 	 nop
 #endif
 
-	/* Get the very one tags we need early in the boot process */
-	nop
-	jal	bi_EarlySnarf
-	 nop
-#ifndef CONFIG_SGI
-	/* Clear BSS first so that there are no surprises... */
-	la	t0, _edata
-	la	t1, _end
-1:	addiu	t0, 1
-	bne	t0, t1, 1b
-	sb	zero, -1(t0)
-#endif
 	/*
 	 * Determine the mmu/cache attached to this machine,
 	 * then flush the tlb and caches.  On the r4xx0
@@ -460,34 +533,10 @@ probe_done:
 	jal	loadmmu
 	 nop
 
-	la	t2, mips_cputype
-	lw	t4, (t2)
-	li	t1, CPU_R2000
-	li	t2, CPU_R3000
-	li	t3, CPU_R3000A
-	beq	t4,t1,2f
-	 nop		
-
-	beq	t4,t2,2f
-	 nop		
-
-	beq	t4,t3,2f
-	 nop		
-
-	jal	wire_mappings_r4xx0
-	 nop	
-
-	b	9f
-	 nop
-
-2:
-	jal	wire_mappings_r3000
-	 nop	
-
 	/*
 	 * Stack for kernel and init, current variable
 	 */
-9:	la	$28, init_task_union
+	la	$28, init_task_union
 	addiu	t0, $28, KERNEL_STACK_SIZE-32
 	sw	t0, kernelsp
 	subu	sp, t0, 4*SZREG
@@ -496,8 +545,14 @@ probe_done:
 	mfc0	t0, CP0_STATUS
 	li	t1, ~(ST0_CU1|ST0_CU2|ST0_CU3|ST0_KX|ST0_SX)
 	and	t0, t1
+#ifdef CONFIG_CPU_R5900
+	and	t0, ~(1<<17)			# clear EDI bit
+#endif
 	or	t0, ST0_CU0
 	mtc0	t0, CP0_STATUS
+#ifdef CONFIG_CPU_R5900
+	sync.p
+#endif
 
 1:	jal	start_kernel
 	 nop
@@ -508,81 +563,6 @@ probe_done:
 	b	1b
 	 nop					# delay slot
 	END(kernel_entry)
-
-/*
- * wire_mappings - used to map hardware registers, r4xx0 version.
- */
-LEAF(wire_mappings_r4xx0)
-	mtc0	zero, CP0_WIRED
-	nop
-	nop
-	nop
-	j	ra
-	 nop
-	END(wire_mappings_r4xx0)
-
-/*
- * R3000 version of wire_mappings.
- */
-LEAF(wire_mappings_r3000)
-	/*
-	 * Get base address of map0 table for the
-	 * the board we're running on
-	 */
-	lw	t1, mips_machtype
-	la	t0, map0table
-	sll	t1, PTRLOG		# machtype used as index
-	addu	t0, t1
-	lw	t0, (t0)		# get base address
-	nop
-	/* Get number of wired TLB entries and
-	 * loop over selected map0 table.
-	 */
-	lw	t1, (t0)		# number of wired TLB entries
-	move	t2, zero		# TLB entry counter
-	addiu	t3, t1, 1		# wire one additional entry
-	beqz	t1, 2f			# null, exit
-	 nop
-
-	addiu	t0, 8
-1:
-	lw	t4, 24(t0)		# PageMask
-	ld	t5,  0(t0)		# entryHi
-	ld	t6,  8(t0)		# entryLo0
-	addiu	t2, 1			# increment ctr
-	mtc0	t2, CP0_INDEX		# set TLB entry
-	nop
-	mtc0	t5, CP0_ENTRYHI
-	nop
-	mtc0	t6, CP0_ENTRYLO0
-	addiu	t0, 32
-	bne	t1, t2, 1b		# next TLB entry
-	 tlbwi
-
-	/* We use only 4k pages. Therefore the PageMask register
-	 * is expected to be setup for 4k pages.
-	 */
-2:
-	/* Now map the pagetables */
-	mtc0	zero, CP0_INDEX
-	la	t0, TLB_ROOT
-	mtc0	t0, CP0_ENTRYHI
-	nop
-	la	t0, swapper_pg_dir
-	srl	t0, 12
-	ori	t0, (0x00e0|0x0100)	# uncachable, dirty, valid
-	mtc0	t0, CP0_ENTRYLO0
-	nop
-	tlbwi				# delayed
-
-	/* Load the context register with zero.  To see why, look
-	 * at how the tlb refill code above works.
-	 */
-	mtc0	zero, CP0_CONTEXT
-
-	jr	ra
-	 nop
-	END(wire_mappings_r3000)
 
 	/* CPU type probing code, called at Kernel entry. */
 	LEAF(cpu_probe)
@@ -701,121 +681,20 @@ LEAF(wire_mappings_r3000)
 	b	probe_done
 	 sw	t2, (t3)
 1:
+	li	t2, PRID_IMP_R5900
+	bne	t1, t2, 1f
+	 nop
+
+	li	t2, CPU_R5900
+	b	probe_done
+	 sw	t2, (t3)
+1:
 	li	t2, CPU_UNKNOWN
 	sw	t2, (t3)
 
 	b	probe_done
 	 nop
 	END(cpu_probe)
-
-	.data
-/*
- * Build an entry for table of wired entries
- */
-#define MAPDATA(q1,q2,q3,w1)                                    \
-		.quad	q1;                                     \
-		.quad	q2;                                     \
-		.quad	q3;                                     \
-		.word	w1;                                     \
-		.word	0
-
-/*
- * Initial mapping tables for supported Mips boards.
- * First item is always the number of wired TLB entries,
- * following by EntryHi/EntryLo pairs and page mask.
- * Since everything must be quad-aligned (8) we insert
- * some dummy zeros.
- *
- * Keep in mind that the PFN does not depend on the page size in the
- * TLB page mask register.  See milo's lib/dumptlb.c for how to decode
- * and encode these entries.  Don't see the same routine in the linux
- * kernel distribution, since it is older and unreliable.
- */
-
-/*
- * Address table of mapping tables for supported Mips boards.
- * Add your own stuff here but don't forget to define your
- * target system in bootinfo.h
- */
-
-map0table:	PTR	map0_dummy		# machtype = unknown
-		PTR	map0_rpc		# Deskstation rPC44
-		PTR	map0_tyne		# Deskstation Tyne
-		PTR	map0_pica61		# Acer Pica-61
-		PTR	map0_magnum4000		# MIPS Magnum 4000PC (RC4030)
-		PTR	map0_dummy
-		PTR	map0_dummy		# DEC Personal DECStation 5000/2x (for now)
-		PTR	map0_sni_rm200_pci	# SNI RM200 PCI
-		PTR	map0_dummy		# SGI INDY
-
-map0_dummy:	.word	0			# 0 entries
-
-		.align  3
-/*
- * Deskstation rpc44 mappings.  This machine has its EISA bus at physical
- * address 0xa0000000 which we map for 32M, but that doesn't match EISA
- * spec.  Not sure what to do about this.  Its I/O ports are memory mapped
- * at physical memory location 0xb0000000.
- */
-map0_rpc: 	.word   2			# no. of wired TLB entries
-		.word	0			# pad for alignment
-
-MAPDATA(0xffffffffe0000000, 0x02800017, 0x00000001, PM_16M)	# ISA Memory space
-MAPDATA(0xffffffffe2000000, 0x02c00017, 0x00000001, PM_64K)	# ISA I/O Space
-
-/*
- * Initial mappings for Deskstation Tyne boards.
- */
-map0_tyne: 	.word   2			# no. of wired TLB entries
-		.word	0			# pad for alignment
-
-MAPDATA(0xffffffffe0000000, 0x04020017, 0x00000001, PM_1M)	# VESA DMA cache
-MAPDATA(0xffffffffe2000000, 0x24000017, 0x04000017, PM_16M)	# VESA I/O and memory space
-
-/*
- * Initial mapping for ACER PICA-61 boards.
- * FIXME: These are rather preliminary since many drivers, such as serial,
- * parallel, scsi and ethernet need some changes to distinguish between "local"
- * (built-in) and "optional" (ISA/PCI) I/O hardware. Local video ram is mapped
- * to the same location as the bios maps it to. Console driver has been changed
- * accordingly (new video type: VIDEO_TYPE_PICA_S3).
- * FIXME: Remove or merge some of the mappings.
- */
-map0_pica61:	.word  	7			# no. wired TLB entries
-		.word	0			# dummy
-
-MAPDATA(0xffffffffe0000000, 0x02000017, 0x00000001, PM_64K)	# Local I/O space
-MAPDATA(0xffffffffe0100000, 0x03c00017, 0x00000001, PM_4K)	# Interrupt source register
-MAPDATA(0xffffffffe0200000, 0x01800017, 0x01804017, PM_1M)	# Local video control
-MAPDATA(0xffffffffe0400000, 0x01808017, 0x0180c017, PM_1M)	# Extended video control
-MAPDATA(0xffffffffe0800000, 0x01000017, 0x01010017, PM_4M)	# Local video memory (BIOS mapping)
-MAPDATA(0xffffffffe2000000, 0x02400017, 0x02440017, PM_16M)	# ISA I/O and ISA memory space (both 16M)
-MAPDATA(0xffffffffffffe000, 0x00000001, 0x0001ffd7, PM_4K)	# PCR (???)
-
-/*
- * Initial mapping for Mips Magnum 4000PC systems.
- * Do you believe me now that the Acer and Mips boxes are nearly the same ? :-)
- * FIXME: Remove or merge some of the mappings.
- */
-map0_magnum4000:
-		.word  	8			# no. wired TLB entries
-		.word	0			# dummy
-
-MAPDATA(0xffffffffe1000000, 0x03ffc013, 0x00000001, PM_256K)	# 0
-MAPDATA(0xffffffffe0000000, 0x02000017, 0x00000001, PM_64K)	# 1 local I/O
-MAPDATA(0xffffffffe0100000, 0x03c00017, 0x00000001, PM_4K)	# 2 IRQ source
-MAPDATA(0xffffffffe0200000, 0x01800017, 0x01804017, PM_1M)	# 3 local video ctrl
-MAPDATA(0xffffffffe0400000, 0x01808017, 0x0180c017, PM_1M)	# 4 ext. video ctrl
-MAPDATA(0xffffffffe0800000, 0x01000017, 0x01010017, PM_4M)	# 5 local video mem.
-MAPDATA(0xffffffffe2000000, 0x02400017, 0x02440017, PM_16M)	# 6 ISA I/O and mem.
-MAPDATA(0xffffffffffffe000, 0x00000001, 0x0001ffd7, PM_4K)	# 7 PCR
-
-/*
- * The RM200 doesn't need any wired entries.
- */
-map0_sni_rm200_pci:
-		.word  	0			# no. wired TLB entries
-		.word	0			# dummy
 
 /*
  * This buffer is reserved for the use of the cache error handler.

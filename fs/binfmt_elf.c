@@ -434,10 +434,18 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	if (!elf_check_arch(elf_ex.e_machine))
 		goto out;
 #ifdef __mips__
-	/* IRIX binaries handled elsewhere. */
-	if (elf_ex.e_flags & EF_MIPS_ARCH) {
-		retval = -ENOEXEC;
-		goto out;
+
+/* allow only mips1 if exec is MIPSEB elf, 
+	because IRIX binaries handled elsewhere. */
+
+/* borrowed from binutils/include/elf/common.h*/
+#define EI_DATA         5               /* Data encoding */
+#define ELFDATA2MSB     2               /* 2's complement, big endian */
+
+	if ((elf_ex.e_ident[EI_DATA] == ELFDATA2MSB ) &&
+		(elf_ex.e_flags & EF_MIPS_ARCH) ) {
+			retval = -ENOEXEC;
+			goto out;
 	}
 #endif
 	if (!bprm->dentry->d_inode->i_op		   ||

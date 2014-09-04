@@ -1,10 +1,10 @@
-/* $Id: syscall.c,v 1.10 1998/08/20 14:38:40 ralf Exp $
+/* $Id: syscall.c,v 1.10 1999/02/15 02:16:52 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 1995 - 1998 by Ralf Baechle
+ * Copyright (C) 1995 - 1999 by Ralf Baechle
  *
  * TODO:  Implement the compatibility syscalls.
  *        Don't waste that much memory for empty entries in the syscall
@@ -48,7 +48,7 @@ asmlinkage int sys_pipe(struct pt_regs regs)
 		res = error;
 		goto out;
 	}
-	regs.regs[3] = fd[1];
+	set_gpreg(&regs, 3, fd[1]);
 	res = fd[0];
 out:
 	unlock_kernel();
@@ -80,11 +80,10 @@ out:
 asmlinkage int sys_idle(void)
 {
 	unsigned long start_idle = 0;
-        int ret = -EPERM;
 
-	lock_kernel();
 	if (current->pid != 0)
-		goto out;
+		return -EPERM;
+
 	/* endless idle loop with no priority at all */
 	current->priority = 0;
 	current->counter = 0;
@@ -110,10 +109,8 @@ asmlinkage int sys_idle(void)
 			start_idle = 0;
 		schedule();
 	}
-	ret = 0;
-out:
-	unlock_kernel();
-	return ret;
+
+	return 0;
 }
 
 asmlinkage int sys_fork(struct pt_regs regs)
@@ -121,9 +118,7 @@ asmlinkage int sys_fork(struct pt_regs regs)
 	int res;
 
 	save_static(&regs);
-	lock_kernel();
-	res = do_fork(SIGCHLD, regs.regs[29], &regs);
-	unlock_kernel();
+	res = do_fork(SIGCHLD, get_gpreg(&regs, 29), &regs);
 	return res;
 }
 
@@ -134,13 +129,30 @@ asmlinkage int sys_clone(struct pt_regs regs)
 	int res;
 
 	save_static(&regs);
-	lock_kernel();
-	clone_flags = regs.regs[4];
-	newsp = regs.regs[5];
+	clone_flags = get_gpreg(&regs, 4);
+	newsp = get_gpreg(&regs, 5);
 	if (!newsp)
-		newsp = regs.regs[29];
+		newsp = get_gpreg(&regs, 29);
 	res = do_fork(clone_flags, newsp, &regs);
-	unlock_kernel();
+	return res;
+}
+
+/*
+ * This is trivial, and on the face of it looks like it
+ * could equally well be done in user mode.
+ *
+ * Not so, for quite unobvious reasons - register pressure.
+ * In user mode vfork() cannot have a stack frame, and if
+ * done by calling the "clone()" system call directly, you
+ * do not have enough call-clobbered registers to hold all
+ * the information you need.
+ */
+asmlinkage int sys_vfork(struct pt_regs regs)
+{
+	int res;
+
+	save_static(&regs);
+	res = do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, get_gpreg(&regs, 29), &regs);
 	return res;
 }
 
@@ -153,12 +165,12 @@ asmlinkage int sys_execve(struct pt_regs regs)
 	char * filename;
 
 	lock_kernel();
-	filename = getname((char *) (long)regs.regs[4]);
+	filename = getname((char *) get_gpreg(&regs, 4));
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		goto out;
-	error = do_execve(filename, (char **) (long)regs.regs[5],
-	                  (char **) (long)regs.regs[6], &regs);
+	error = do_execve(filename, (char **) get_gpreg(&regs, 5),
+	                  (char **) get_gpreg(&regs, 6), &regs);
 	putname(filename);
 
 out:
@@ -212,7 +224,7 @@ asmlinkage int sys_olduname(struct oldold_utsname * name)
 asmlinkage int sys_syscall(struct pt_regs regs)
 {
 	syscall_t syscall;
-	unsigned long syscallnr = regs.regs[4];
+	unsigned long syscallnr = get_gpreg(&regs, 4);
 	unsigned long a0, a1, a2, a3, a4, a5, a6;
 	int nargs, errno;
 
@@ -234,7 +246,7 @@ asmlinkage int sys_syscall(struct pt_regs regs)
 	}
 
 	if(nargs > 3) {
-		unsigned long usp = regs.regs[29];
+		unsigned long usp = get_gpreg(&regs, 29);
 		unsigned long *sp = (unsigned long *) usp;
 		if(usp & 3) {
 			printk("unaligned usp -EFAULT\n");
@@ -267,7 +279,7 @@ asmlinkage int sys_syscall(struct pt_regs regs)
 	} else {
 		a3 = a4 = a5 = a6 = 0;
 	}
-	a0 = regs.regs[5]; a1 = regs.regs[6]; a2 = regs.regs[7];
+	a0 = get_gpreg(&regs, 5); a1 = get_gpreg(&regs, 6); a2 = get_gpreg(&regs, 7);
 	if(nargs == 0)
 		a0 = (unsigned long) &regs;
 	return syscall((void *)a0, a1, a2, a3, a4, a5, a6);

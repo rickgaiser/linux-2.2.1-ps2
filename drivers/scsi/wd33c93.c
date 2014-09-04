@@ -603,7 +603,6 @@ no:
                      (is_dir_out(cmd))?DATA_OUT_DIR:DATA_IN_DIR))
             write_wd33c93_count(regp,0); /* guarantee a DATA_PHASE interrupt */
          else {
-            write_wd33c93_count(regp, cmd->SCp.this_residual);
             write_wd33c93(regp,WD_CONTROL, CTRL_IDI | CTRL_EDI | CTRL_DMA);
             hostdata->dma = D_DMA_RUNNING;
             }
@@ -724,7 +723,6 @@ use_transfer_pio:
       hostdata->dma_cnt++;
 #endif
       write_wd33c93(regp, WD_CONTROL, CTRL_IDI | CTRL_EDI | CTRL_DMA);
-      write_wd33c93_count(regp,cmd->SCp.this_residual);
 
       if ((hostdata->level2 >= L2_DATA) ||
           (hostdata->level2 == L2_BASIC && cmd->SCp.phase == 0)) {
@@ -1352,7 +1350,7 @@ DB(DB_INTR,printk("} "))
 
 
 
-static void reset_wd33c93(struct Scsi_Host *instance)
+void reset_wd33c93(struct Scsi_Host *instance)
 {
 struct WD33C93_hostdata *hostdata;
 wd33c93_regs *regp;
@@ -1360,6 +1358,27 @@ uchar sr;
 
    hostdata = (struct WD33C93_hostdata *)instance->hostdata;
    regp = hostdata->regp;
+
+#ifdef CONFIG_SGI
+{
+int busycount = 0;
+extern void sgiwd93_reset(void);
+
+   /* wait 'til the chip gets some time for us */
+   while (READ_AUX_STAT() & ASR_BSY && busycount++ < 100)
+	udelay (10);
+   /*
+    * there are scsi devices out there, which manage to lock up
+    * the wd33c93 in a busy condition. In this state it won't
+    * accept the reset command. The only way to solve this is to
+    * give the chip a hardware reset (if possible). The code below
+    * does this for the SGI Indy, where this is possible
+    */
+   /* still busy ? */
+   if (READ_AUX_STAT() & ASR_BSY)
+	sgiwd93_reset(); /* yeah, give it the hard one */
+}
+#endif
 
    write_wd33c93(regp, WD_OWN_ID, OWNID_EAF | OWNID_RAF |
                  instance->this_id | hostdata->clock_freq);
@@ -1457,6 +1476,8 @@ Scsi_Cmnd *tmp, *prev;
       if (tmp == cmd) {
          if (prev)
             prev->host_scribble = cmd->host_scribble;
+	 else
+            hostdata->input_Q = (Scsi_Cmnd *)cmd->host_scribble;
          cmd->host_scribble = NULL;
          cmd->result = DID_ABORT << 16;
          printk("scsi%d: Abort - removing command %ld from input_Q. ",

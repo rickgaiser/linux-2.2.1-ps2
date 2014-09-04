@@ -1,10 +1,11 @@
-/* $Id: scall_o32.S,v 1.5 1998/08/19 21:53:50 ralf Exp $
+/* $Id: scall_o32.S,v 1.4 1998/06/25 20:01:01 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
  * Copyright (C) 1997, 1998 by Ralf Baechle
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  */
 #include <asm/asm.h>
 #include <linux/errno.h>
@@ -13,6 +14,9 @@
 #include <asm/regdef.h>
 #include <asm/stackframe.h>
 #include <asm/unistd.h>
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+#include <linux/tst_dev.h>
+#endif
 
 /* This duplicates the definition from <linux/sched.h> */
 #define PF_TRACESYS	0x00000020	/* tracing system calls */
@@ -22,6 +26,14 @@
 
 /* Highest syscall used of any syscall flavour */
 #define MAX_SYSCALL_NO	__NR_Linux + __NR_Linux_syscalls
+
+#ifdef CONFIG_CONTEXT_R5900
+#define S_GREG	sq
+#define L_GREG	lq
+#else
+#define S_GREG	sw
+#define L_GREG	lw
+#endif
 
 	.align  5
 NESTED(handle_sys, PT_SIZE, sp)
@@ -44,6 +56,7 @@ NESTED(handle_sys, PT_SIZE, sp)
 	beqz	t2, illegal_syscall;
 
 	subu	t0, t3, 5		# 5 or more arguments?
+	S_GREG	a3, PT_R26(sp)		# save a3 for syscall restarting
 	bgez	t0, stackargs
 
 stack_done:
@@ -55,12 +68,12 @@ stack_done:
 
 	li	t0, -EMAXERRNO - 1	# error?
 	sltu	t0, t0, v0
-	sw	t0, PT_R7(sp)		# set error flag
+	S_GREG	t0, PT_R7(sp)		# set error flag
 	beqz	t0, 1f
 
 	negu	v0			# error
-	sw	v0, PT_R0(sp)		# set flag for syscall restarting
-1:	sw	v0, PT_R2(sp)		# result
+	S_GREG	v0, PT_R0(sp)		# set flag for syscall restarting
+1:	S_GREG	v0, PT_R2(sp)		# result
 
 EXPORT(o32_ret_from_sys_call)
 	lw	t0,bh_mask
@@ -76,13 +89,16 @@ EXPORT(o32_ret_from_sys_call)
 	lw	v0, TASK_SIGPENDING($28)
 	move	a0, zero
 	beqz	v0, o32_return
-	move	a1, sp
+	MOVE	(a1, sp)
 	SAVE_STATIC
 	jal	do_signal
 
 o32_return:
 	RESTORE_SOME
 	RESTORE_SP
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+        li k1, _TST_ACCESS_MAGIC
+#endif
 	.set	mips3
 	eret
 	.set	mips0
@@ -99,27 +115,37 @@ o32_reschedule:
 
 trace_a_syscall:
 	SAVE_STATIC
-	sw	t2,PT_R1(sp)
+	S_GREG	v0, PT_R2(sp)
 	jal	syscall_trace
-	lw	t2,PT_R1(sp)
+	L_GREG	v0, PT_R2(sp)
 
-	lw	a0, PT_R4(sp)		# Restore argument registers
-	lw	a1, PT_R5(sp)
-	lw	a2, PT_R6(sp)
-	lw	a3, PT_R7(sp)
+	sltiu	t0, v0, MAX_SYSCALL_NO + 1 # check syscall number
+	beqz	t0, 2f
+	sll	t0, v0, 2
+	lw	t2, sys_call_table(t0)	# syscall routine
+	beqz	t2, 2f;
+
+	L_GREG	a0, PT_R4(sp)		# Restore argument registers
+	L_GREG	a1, PT_R5(sp)
+	L_GREG	a2, PT_R6(sp)
+	L_GREG	a3, PT_R7(sp)
 	jalr	t2
-
+3:
 	li	t0, -EMAXERRNO - 1	# error?
 	sltu	t0, t0, v0
-	sw	t0, PT_R7(sp)		# set error flag
+	S_GREG	t0, PT_R7(sp)		# set error flag
 	beqz	t0, 1f
 
 	negu	v0			# error
-	sw	v0, PT_R0(sp)		# set flag for syscall restarting
-1:	sw	v0, PT_R2(sp)		# result
+	S_GREG	v0, PT_R0(sp)		# set flag for syscall restarting
+1:	S_GREG	v0, PT_R2(sp)		# result
 
 	jal	syscall_trace
 	j	ret_from_sys_call
+
+2:
+	li	v0, -ENOSYS		# illegal syscall
+	b	3b
 
 /* ------------------------------------------------------------------------ */
 
@@ -129,7 +155,7 @@ trace_a_syscall:
 	 * This Sucks (TM).
 	 */
 stackargs:
-	lw	t0, PT_R29(sp)		# get old user stack pointer
+	L_GREG	t0, PT_R29(sp)		# get old user stack pointer
 	subu	t3, 4
 	sll	t1, t3, 2		# stack valid?
 
@@ -137,17 +163,23 @@ stackargs:
 	or	t0, t1
 	bltz	t0, bad_stack		# -> sp is bad
 
-	lw	t0, PT_R29(sp)		# get old user stack pointer
+	L_GREG	t0, PT_R29(sp)		# get old user stack pointer
 	la	t1, 3f			# copy 1 to 2 arguments
-	sll	t3, t3, 3
+	sll	t3, t3, 4
 	subu	t1, t3
 	jr	t1
 
 	/* Ok, copy the args from the luser stack to the kernel stack */
+	.set	noreorder
 1:	lw	t1, 20(t0)		# argument #6 from usp
+	nop
 	sw	t1, 20(sp)
+	nop
 2:	lw	t1, 16(t0)		# argument #5 from usp
+	nop
 	sw	t1, 16(sp)
+	nop
+	.set	reorder
 
 3:	j	stack_done		# go back
 
@@ -161,10 +193,10 @@ stackargs:
 	 */
 bad_stack:
 	negu	v0				# error
-	sw	v0, PT_R0(sp)
-	sw	v0, PT_R2(sp)
+	S_GREG	v0, PT_R0(sp)
+	S_GREG	v0, PT_R2(sp)
 	li	t0, 1				# set error flag
-	sw	t0, PT_R7(sp)
+	S_GREG	t0, PT_R7(sp)
 	j	ret_from_sys_call
 
 	/*
@@ -172,7 +204,7 @@ bad_stack:
 	 */
 illegal_syscall:
 	li	v0, ENOSYS			# error
-	sw	v0, PT_R2(sp)
+	S_GREG	v0, PT_R2(sp)
 	li	t0, 1				# set error flag
-	sw	t0, PT_R7(sp)
+	S_GREG	t0, PT_R7(sp)
 	j	ret_from_sys_call

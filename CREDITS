@@ -320,6 +320,10 @@ S: 4 Place Jussieu
 S: 75252 Paris Cedex 05
 S: France
 
+N: Ulf Carlsson
+D: SGI Indy audio (HAL2) drivers
+E: ulfc@bun.falkenberg.se
+
 N: Ed Carp
 E: ecarp@netcom.com
 D: uucp, elm, pine, pico port
@@ -448,6 +452,14 @@ D: Random console hacks and other miscellaneous stuff
 S: 3000 FORE Drive
 S: Warrendale, Pennsylvania 15086
 S: USA
+
+N: Alex deVries
+E: puffin@redhat.com
+D: Various SGI parts, bits of HAL2 and Newport
+S: 18 Bernier Terrace
+S: Kanata, Ontario
+S: K2L 2V@
+S: CANADA
 
 N: Eddie C. Dost
 E: ecd@skynet.be
@@ -1269,6 +1281,13 @@ D: XF86_Mach32
 D: XF86_Mach8
 D: XF86_8514
 D: cfdisk (curses based disk partitioning program)
+
+N: Heinz Mauelshagen
+E: mge@ez-darmstadt.telekom.de
+D: Logical Volume Manager
+S: Bartningstr. 12
+S: 64289 Darmstadt
+S: Germany
 
 N: Mike McLagan
 E: mike.mclagan@linux.org

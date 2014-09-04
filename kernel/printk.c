@@ -286,6 +286,12 @@ asmlinkage int printk(const char *fmt, ...)
 				c = c->next;
 			}
 		}
+#ifdef CONFIG_PROM_PRINTK
+		{
+			void prom_write(char *, int);
+			prom_write(msg, p - msg +line_feed);
+		}
+#endif
 		if (line_feed)
 			msg_level = -1;
 	}

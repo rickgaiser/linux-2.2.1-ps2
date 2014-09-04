@@ -1,4 +1,4 @@
-/* $Id: string.h,v 1.6 1998/07/20 17:52:21 ralf Exp $
+/* $Id: string.h,v 1.10 1999/04/11 18:37:56 harald Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -6,8 +6,12 @@
  *
  * Copyright (c) 1994, 1995, 1996, 1997, 1998 by Ralf Baechle
  */
-#ifndef __ASM_MIPS_STRING_H
-#define __ASM_MIPS_STRING_H
+#ifndef _ASM_STRING_H
+#define _ASM_STRING_H
+
+#include <linux/autoconf.h>
+
+#if defined(__KERNEL__)
 
 #define __HAVE_ARCH_STRCPY
 extern __inline__ char *strcpy(char *__dest, __const__ char *__src)
@@ -17,11 +21,27 @@ extern __inline__ char *strcpy(char *__dest, __const__ char *__src)
   __asm__ __volatile__(
 	".set\tnoreorder\n\t"
 	".set\tnoat\n"
+#ifdef CONFIG_CPU_R5900	/*inhibit short loop */
+     "1:\n\t"
+	"lbu\t$1,(%1)\n\t"
+	"addiu\t%1,1\n\t"
+	"sb\t$1,(%0)\n\t"
+	"beqz\t$1,2f\n\t"
+	"addiu\t%0,1\n\t"
+	""
+	"lbu\t$1,(%1)\n\t"
+	"addiu\t%1,1\n\t"
+	"sb\t$1,(%0)\n\t"
+	"bnez\t$1,1b\n\t"
+	"addiu\t%0,1\n\t"
+     "2:\n\t"
+#else
 	"1:\tlbu\t$1,(%1)\n\t"
 	"addiu\t%1,1\n\t"
 	"sb\t$1,(%0)\n\t"
 	"bnez\t$1,1b\n\t"
 	"addiu\t%0,1\n\t"
+#endif
 	".set\tat\n\t"
 	".set\treorder"
 	: "=r" (__dest), "=r" (__src)
@@ -89,11 +109,12 @@ extern __inline__ int strcmp(__const__ char *__cs, __const__ char *__ct)
 }
 
 #define __HAVE_ARCH_STRNCMP
-extern __inline__ int strncmp(__const__ char *__cs, __const__ char *__ct, size_t __count)
+extern __inline__ int
+strncmp(__const__ char *__cs, __const__ char *__ct, size_t __count)
 {
-  int __res;
+	int __res;
 
-  __asm__ __volatile__(
+	__asm__ __volatile__(
 	".set\tnoreorder\n\t"
 	".set\tnoat\n"
 	"1:\tlbu\t%3,(%0)\n\t"
@@ -112,7 +133,7 @@ extern __inline__ int strncmp(__const__ char *__cs, __const__ char *__ct, size_t
 	: "0" (__cs), "1" (__ct), "2" (__count)
 	: "$1");
 
-  return __res;
+	return __res;
 }
 
 #define __HAVE_ARCH_MEMSET
@@ -131,18 +152,23 @@ extern void *memmove(void *__dest, __const__ void *__src, size_t __n);
 extern __inline__ void *memscan(void *__addr, int __c, size_t __size)
 {
 	char *__end = (char *)__addr + __size;
+	unsigned char __uc = (unsigned char) __c;
 
-	__asm__(".set\tnoat\n"
+	__asm__(".set\tpush\n\t"
+		".set\tnoat\n\t"
+		".set\treorder\n\t"
 		"1:\tbeq\t%0,%1,2f\n\t"
 		"addiu\t%0,1\n\t"
-		"lb\t$1,-1(%0)\n\t"
-		"bne\t$1,%4,1b\n"
-		"2:\t.set\tat"
+		"lbu\t$1,-1(%0)\n\t"
+		"bne\t$1,%z4,1b\n"
+		"2:\t.set\tpop"
 		: "=r" (__addr), "=r" (__end)
-		: "0" (__addr), "1" (__end), "r" (__c)
+		: "0" (__addr), "1" (__end), "Jr" (__uc)
 		: "$1");
 
 	return __addr;
 }
 
-#endif /* __ASM_MIPS_STRING_H */
+#endif /* defined(__KERNEL__)*/
+
+#endif /* _ASM_STRING_H */

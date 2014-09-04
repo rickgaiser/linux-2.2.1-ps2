@@ -240,7 +240,11 @@
 #endif
 
 #ifdef CONFIG_SCSI_SUNESP
-#include "esp.h"
+#include "sparc_esp.h"
+#endif
+
+#ifdef CONFIG_SCSI_SGIWD93
+#include "sgiwd93.h"
 #endif
 
 #ifdef CONFIG_SCSI_QLOGICPTI
@@ -313,6 +317,10 @@
 
 #ifdef CONFIG_JAZZ_ESP
 #include "jazz_esp.h"
+#endif
+
+#ifdef CONFIG_SCSI_DECNCR
+#include "dec_esp.h"
 #endif
 
 /*
@@ -568,6 +576,9 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
     POWERTECSCSI,
 #endif
 #endif
+#ifdef CONFIG_SCSI_DECNCR	
+    SCSI_DEC_ESP,
+#endif	
 /* "Removable host adapters" below this line (Parallel Port/USB/other) */
 #ifdef CONFIG_SCSI_PPA
     PPA,
@@ -575,6 +586,12 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #ifdef CONFIG_SCSI_IMM
     IMM,
 #endif
+#ifdef CONFIG_SCSI_SGIWD93
+    SGIWD93_SCSI,
+#endif
+#ifdef CONFIG_JAZZ_ESP	
+    SCSI_JAZZ_ESP,
+#endif	
 #ifdef CONFIG_SCSI_DEBUG
     SCSI_DEBUG,
 #endif

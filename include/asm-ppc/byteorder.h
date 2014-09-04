@@ -2,7 +2,7 @@
 #define _PPC_BYTEORDER_H
 
 /*
- *  $Id: byteorder.h,v 1.14 1998/08/12 05:07:12 paulus Exp $
+ *  $Id: byteorder.h,v 1.7 1999/01/04 16:09:30 ralf Exp $
  */
 
 #include <asm/types.h>

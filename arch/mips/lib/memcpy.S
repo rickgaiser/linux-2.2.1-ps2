@@ -3,13 +3,15 @@
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * $Id: memcpy.S,v 1.4 1998/07/03 14:05:33 ralf Exp $
+ * $Id: memcpy.S,v 1.3 1998/07/10 01:14:49 ralf Exp $
  *
  * Unified implementation of memcpy, memmove and the __copy_user backend.
  * For __rmemcpy and memmove an exception is always a kernel bug, therefore
  * they're not protected.  In order to keep the exception fixup routine
  * simple all memory accesses in __copy_user to src rsp. dst are stricly
  * incremental.  The fixup routine depends on $at not being changed.
+ * copy_from_user() and __copy_from_user() pass $at as the end of source.
+ * Please refer include/asm-mips/uaccess.h for details.
  */
 #include <asm/asm.h>
 #include <asm/offset.h>
@@ -216,6 +218,9 @@ do_end_words:
 	 srl	t8, t8, 0x2
 
 end_words:
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	nop
+#endif
 	EX(lw, t0, (a1), l_fixup)
 	subu	t8, t8, 0x1
 	EX(sw, t0, (a0), s_fixup)
@@ -231,6 +236,9 @@ small_memcpy:
 	 move	a2, t2
 
 end_bytes:
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	nop
+#endif
 	EX(lb, t0, (a1), l_fixup)
 	subu	a2, a2, 0x1
 	EX(sb, t0, (a0), s_fixup)
@@ -253,6 +261,8 @@ memcpy_u_src:
 	ori	t0, 7
 	xori	t0, 7
 	subu	t0, a1
+
+	# NOTE: This way not overlapping-safe
 
 	UEX(ulw, t1, 0(a1), l_fixup)		# dword alignment
 	UEX(ulw, t2, 4(a1), l_fixup)
@@ -353,6 +363,9 @@ u_cannot_optimize:
 	 move	a2, t2
 
 u_end_bytes:
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	nop
+#endif
 	EX(lb, t0, (a1), l_fixup)
 	subu	a2, a2, 0x1
 	EX(sb, t0, (a0), s_fixup)
@@ -404,9 +417,22 @@ u_end_bytes:
 
 	.align	5
 LEAF(memmove)
+#if 1
+	# NOTE:
+	# small_memcpy() is always overlap-safe,
+	# but memcpy() needs 8 bytes margin.
+	subu	t0, a1, a0			# if ((src-dst)>8) --> memcpy
+	subu	t1, t0, 8
+	bgtz	t1, memcpy
+	 addu	v0, a0, a2
+	bgtz	t0, small_memcpy		# else if (src>dst)
+	 move	t2, a2				#       --> small_memcpy
+#else
 	sltu	t0, a0, a1			# dst < src -> memcpy
 	bnez	t0, memcpy
 	 addu	v0, a0, a2
+
+#endif
 	sltu	t0, v0, a1			# dst + len < src -> non-
 	bnez	t0, __memcpy			# overlapping, can use memcpy
 	 move	v0, a0				/* return value */
@@ -550,12 +576,15 @@ r_end_words:
 r_maybe_end_cruft:
 	andi	t2, a2, 0x3
 
+#endif /* Horror fix */
 r_small_memcpy:
 	beqz	t2, r_out
 	 move	a2, t2
-#endif /* Horror fix */
 
 r_end_bytes:
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	nop
+#endif
 	lb	t0, -1(a1)
 	subu	a2, a2, 0x1
 	sb	t0, -1(a0)

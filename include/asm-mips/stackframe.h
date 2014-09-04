@@ -2,47 +2,100 @@
  *  include/asm-mips/stackframe.h
  *
  *  Copyright (C) 1994, 1995, 1996 by Ralf Baechle and Paul M. Antoine.
+ *  Copyright (C) 2000  Sony Computer Entertainment Inc.
  *
- * $Id: stackframe.h,v 1.7 1998/04/28 19:39:15 ralf Exp $
+ * $Id: stackframe.h,v 1.8 1999/05/01 10:08:19 harald Exp $
  */
 #ifndef __ASM_MIPS_STACKFRAME_H
 #define __ASM_MIPS_STACKFRAME_H
 
+#include <linux/autoconf.h>
 #include <asm/asm.h>
 #include <asm/offset.h>
 
-#define SAVE_AT                                          \
-		sw	$1, PT_R1(sp)
+#ifdef CONFIG_CPU_R5900
+#define SYNC_AFTER_MTC0	sync.p
+#else
+#define SYNC_AFTER_MTC0	
+#endif
 
+#ifdef CONFIG_CONTEXT_R5900
+#include <asm/r5900_offset.h>
+#define L_GREG	lq
+#define S_GREG	sq
+#define MOVE(dst,src)	por	dst, src, $0
+#else
+#define L_GREG	lw
+#define S_GREG	sw
+#define MOVE(dst,src)	move	dst, src
+#endif
+
+#define SAVE_AT                                          \
+		S_GREG	$1, PT_R1(sp)
+
+#ifdef CONFIG_CONTEXT_R5900
+#define SAVE_TEMP                                        \
+		pmfhi	v1;                              \
+		S_GREG	$8, PT_R8(sp);                   \
+		S_GREG	$9, PT_R9(sp);                   \
+		S_GREG	v1, PT_HI(sp);                   \
+		pmflo	v1;                              \
+		S_GREG	$10, PT_R10(sp);                 \
+		S_GREG	$11, PT_R11(sp);                 \
+		S_GREG	v1,  PT_LO(sp);                  \
+		S_GREG	$12, PT_R12(sp);                 \
+		S_GREG	$13, PT_R13(sp);                 \
+		S_GREG	$14, PT_R14(sp);                 \
+		S_GREG	$15, PT_R15(sp);                 \
+		mfsa    v1;				 \
+		S_GREG	$24, PT_R24(sp);		 \
+		sw	v1,  PT_SA(sp)
+#else /* CONFIG_CONTEXT_R5900 */
 #define SAVE_TEMP                                        \
 		mfhi	v1;                              \
-		sw	$8, PT_R8(sp);                   \
-		sw	$9, PT_R9(sp);                   \
-		sw	v1, PT_HI(sp);                   \
+		S_GREG	$8, PT_R8(sp);                   \
+		S_GREG	$9, PT_R9(sp);                   \
+		S_GREG	v1, PT_HI(sp);                   \
 		mflo	v1;                              \
-		sw	$10,PT_R10(sp);                  \
-		sw	$11, PT_R11(sp);                 \
-		sw	v1,  PT_LO(sp);                  \
-		sw	$12, PT_R12(sp);                 \
-		sw	$13, PT_R13(sp);                 \
-		sw	$14, PT_R14(sp);                 \
-		sw	$15, PT_R15(sp);                 \
-		sw	$24, PT_R24(sp)
+		S_GREG	$10, PT_R10(sp);                 \
+		S_GREG	$11, PT_R11(sp);                 \
+		S_GREG	v1,  PT_LO(sp);                  \
+		S_GREG	$12, PT_R12(sp);                 \
+		S_GREG	$13, PT_R13(sp);                 \
+		S_GREG	$14, PT_R14(sp);                 \
+		S_GREG	$15, PT_R15(sp);                 \
+		S_GREG	$24, PT_R24(sp)
+#endif /* CONFIG_CONTEXT_R5900 */
 
 #define SAVE_STATIC                                      \
-		sw	$16, PT_R16(sp);                 \
-		sw	$17, PT_R17(sp);                 \
-		sw	$18, PT_R18(sp);                 \
-		sw	$19, PT_R19(sp);                 \
-		sw	$20, PT_R20(sp);                 \
-		sw	$21, PT_R21(sp);                 \
-		sw	$22, PT_R22(sp);                 \
-		sw	$23, PT_R23(sp);                 \
-		sw	$30, PT_R30(sp)
+		S_GREG	$16, PT_R16(sp);                 \
+		S_GREG	$17, PT_R17(sp);                 \
+		S_GREG	$18, PT_R18(sp);                 \
+		S_GREG	$19, PT_R19(sp);                 \
+		S_GREG	$20, PT_R20(sp);                 \
+		S_GREG	$21, PT_R21(sp);                 \
+		S_GREG	$22, PT_R22(sp);                 \
+		S_GREG	$23, PT_R23(sp);                 \
+		S_GREG	$30, PT_R30(sp)
 
 #define __str2(x) #x
 #define __str(x) __str2(x)
 
+#ifdef CONFIG_CONTEXT_R5900
+#define save_static(frame)                               \
+	__asm__ __volatile__(                            \
+		"sq\t$16,"__str(PT_R16)"(%0)\n\t"        \
+		"sq\t$17,"__str(PT_R17)"(%0)\n\t"        \
+		"sq\t$18,"__str(PT_R18)"(%0)\n\t"        \
+		"sq\t$19,"__str(PT_R19)"(%0)\n\t"        \
+		"sq\t$20,"__str(PT_R20)"(%0)\n\t"        \
+		"sq\t$21,"__str(PT_R21)"(%0)\n\t"        \
+		"sq\t$22,"__str(PT_R22)"(%0)\n\t"        \
+		"sq\t$23,"__str(PT_R23)"(%0)\n\t"        \
+		"sq\t$30,"__str(PT_R30)"(%0)\n\t"        \
+		: /* No outputs */                       \
+		: "r" (frame))
+#else /* CONFIG_CONTEXT_R5900 */
 #define save_static(frame)                               \
 	__asm__ __volatile__(                            \
 		"sw\t$16,"__str(PT_R16)"(%0)\n\t"        \
@@ -56,6 +109,7 @@
 		"sw\t$30,"__str(PT_R30)"(%0)\n\t"        \
 		: /* No outputs */                       \
 		: "r" (frame))
+#endif /* CONFIG_CONTEXT_R5900 */
 
 #define SAVE_SOME                                        \
 		.set	push;                            \
@@ -64,31 +118,31 @@
 		sll	k0, 3;     /* extract cu0 bit */ \
 		.set	noreorder;                       \
 		bltz	k0, 8f;                          \
-		 move	k1, sp;                          \
+		move	k1, sp;                          \
 		.set	reorder;                         \
 		/* Called from user mode, new stack. */  \
 		lui	k1, %hi(kernelsp);               \
 		lw	k1, %lo(kernelsp)(k1);           \
 8:                                                       \
-		move	k0, sp;                          \
+		MOVE	(k0, sp);                        \
 		subu	sp, k1, PT_SIZE;                 \
-		sw	k0, PT_R29(sp);                  \
-		sw	$3, PT_R3(sp);                   \
-		sw	$0, PT_R0(sp);			 \
+		S_GREG	k0, PT_R29(sp);                  \
+		S_GREG	$3, PT_R3(sp);                   \
+		S_GREG	$0, PT_R0(sp);			 \
 		mfc0	v1, CP0_STATUS;                  \
-		sw	$2, PT_R2(sp);                   \
+		S_GREG	$2, PT_R2(sp);                   \
 		sw	v1, PT_STATUS(sp);               \
-		sw	$4, PT_R4(sp);                   \
+		S_GREG	$4, PT_R4(sp);                   \
 		mfc0	v1, CP0_CAUSE;                   \
-		sw	$5, PT_R5(sp);                   \
+		S_GREG	$5, PT_R5(sp);                   \
 		sw	v1, PT_CAUSE(sp);                \
-		sw	$6, PT_R6(sp);                   \
+		S_GREG	$6, PT_R6(sp);                   \
 		mfc0	v1, CP0_EPC;                     \
-		sw	$7, PT_R7(sp);                   \
+		S_GREG	$7, PT_R7(sp);                   \
 		sw	v1, PT_EPC(sp);                  \
-		sw	$25, PT_R25(sp);                 \
-		sw	$28, PT_R28(sp);                 \
-		sw	$31, PT_R31(sp);                 \
+		S_GREG	$25, PT_R25(sp);                 \
+		S_GREG	$28, PT_R28(sp);                 \
+		S_GREG	$31, PT_R31(sp);                 \
 		ori	$28, sp, 0x1fff;                 \
 		xori	$28, 0x1fff;                     \
 		.set	pop
@@ -100,36 +154,55 @@
 		SAVE_STATIC
 
 #define RESTORE_AT                                       \
-		lw	$1,  PT_R1(sp);                  \
+		L_GREG	$1,  PT_R1(sp)
 
 #define RESTORE_SP                                       \
-		lw	sp,  PT_R29(sp)
+		L_GREG	sp,  PT_R29(sp)
 
+#ifdef CONFIG_CONTEXT_R5900
 #define RESTORE_TEMP                                     \
-		lw	$24, PT_LO(sp);                  \
-		lw	$8, PT_R8(sp);                   \
-		lw	$9, PT_R9(sp);                   \
+		L_GREG	$24, PT_LO(sp);                  \
+		L_GREG	$8, PT_R8(sp);                   \
+		pmtlo	$24;                             \
+		L_GREG	$9, PT_R9(sp);                   \
+		L_GREG	$24, PT_HI(sp);                  \
+		L_GREG	$10,PT_R10(sp);                  \
+		pmthi	$24;                             \
+		L_GREG	$11, PT_R11(sp);                 \
+		L_GREG	$12, PT_R12(sp);                 \
+		L_GREG	$13, PT_R13(sp);                 \
+		lw	$24, PT_SA(sp);			 \
+		L_GREG	$14, PT_R14(sp);                 \
+		mtsa	$24;				 \
+		L_GREG	$15, PT_R15(sp);                 \
+		L_GREG	$24, PT_R24(sp)
+#else /* CONFIG_CONTEXT_R5900 */
+#define RESTORE_TEMP                                     \
+		L_GREG	$24, PT_LO(sp);                  \
+		L_GREG	$8, PT_R8(sp);                   \
+		L_GREG	$9, PT_R9(sp);                   \
 		mtlo	$24;                             \
-		lw	$24, PT_HI(sp);                  \
-		lw	$10,PT_R10(sp);                  \
-		lw	$11, PT_R11(sp);                 \
+		L_GREG	$24, PT_HI(sp);                  \
+		L_GREG	$10,PT_R10(sp);                  \
+		L_GREG	$11, PT_R11(sp);                 \
 		mthi	$24;                             \
-		lw	$12, PT_R12(sp);                 \
-		lw	$13, PT_R13(sp);                 \
-		lw	$14, PT_R14(sp);                 \
-		lw	$15, PT_R15(sp);                 \
-		lw	$24, PT_R24(sp)
+		L_GREG	$12, PT_R12(sp);                 \
+		L_GREG	$13, PT_R13(sp);                 \
+		L_GREG	$14, PT_R14(sp);                 \
+		L_GREG	$15, PT_R15(sp);                 \
+		L_GREG	$24, PT_R24(sp)
+#endif /* CONFIG_CONTEXT_R5900 */
 
 #define RESTORE_STATIC                                   \
-		lw	$16, PT_R16(sp);                 \
-		lw	$17, PT_R17(sp);                 \
-		lw	$18, PT_R18(sp);                 \
-		lw	$19, PT_R19(sp);                 \
-		lw	$20, PT_R20(sp);                 \
-		lw	$21, PT_R21(sp);                 \
-		lw	$22, PT_R22(sp);                 \
-		lw	$23, PT_R23(sp);                 \
-		lw	$30, PT_R30(sp)
+		L_GREG	$16, PT_R16(sp);                 \
+		L_GREG	$17, PT_R17(sp);                 \
+		L_GREG	$18, PT_R18(sp);                 \
+		L_GREG	$19, PT_R19(sp);                 \
+		L_GREG	$20, PT_R20(sp);                 \
+		L_GREG	$21, PT_R21(sp);                 \
+		L_GREG	$22, PT_R22(sp);                 \
+		L_GREG	$23, PT_R23(sp);                 \
+		L_GREG	$30, PT_R30(sp)
 
 #define RESTORE_SOME                                     \
 		.set	push;                            \
@@ -138,20 +211,38 @@
 		.set	pop;                             \
 		ori	t0, 0x1f;                        \
 		xori	t0, 0x1f;                        \
+		.set	push;                            \
+		.set	noreorder;                        \
 		mtc0	t0, CP0_STATUS;                  \
+		SYNC_AFTER_MTC0;			 \
+		.set	pop;                             \
+		li	v1, 0xff00;                      \
+		and	t0, v1;				 \
 		lw	v0, PT_STATUS(sp);               \
+		nor	v1, $0, v1;			 \
+		and	v0, v1;				 \
+		or	v0, t0;				 \
+		.set	push;                            \
+		.set	noreorder;                        \
 		mtc0	v0, CP0_STATUS;                  \
+		SYNC_AFTER_MTC0;			 \
+		.set	pop;                             \
 		lw	v1, PT_EPC(sp);                  \
+		.set	push;                            \
+		.set	noreorder;                        \
 		mtc0	v1, CP0_EPC;                     \
-		lw	$31, PT_R31(sp);                 \
-		lw	$28, PT_R28(sp);                 \
-		lw	$25, PT_R25(sp);                 \
-		lw	$7,  PT_R7(sp);                  \
-		lw	$6,  PT_R6(sp);                  \
-		lw	$5,  PT_R5(sp);                  \
-		lw	$4,  PT_R4(sp);                  \
-		lw	$3,  PT_R3(sp);                  \
-		lw	$2,  PT_R2(sp)
+		SYNC_AFTER_MTC0;			 \
+		.set	pop;                             \
+		L_GREG	$31, PT_R31(sp);                 \
+		L_GREG	$28, PT_R28(sp);                 \
+		L_GREG	$25, PT_R25(sp);                 \
+		L_GREG	$7,  PT_R7(sp);                  \
+		L_GREG	$6,  PT_R6(sp);                  \
+		L_GREG	$5,  PT_R5(sp);                  \
+		L_GREG	$4,  PT_R4(sp);                  \
+		L_GREG	$3,  PT_R3(sp);                  \
+		L_GREG	$2,  PT_R2(sp)
+
 
 #define RESTORE_ALL                                      \
 		RESTORE_SOME;                            \
@@ -169,7 +260,11 @@
 		li	t1,ST0_CU0|0x1f;                \
 		or	t0,t1;                          \
 		xori	t0,0x1f;                        \
-		mtc0	t0,CP0_STATUS
+		.set	push;				\
+		.set	noreorder;			\
+		mtc0	t0,CP0_STATUS;			\
+		SYNC_AFTER_MTC0;			\
+		.set	pop
 
 /*
  * Move to kernel mode and enable interrupts.
@@ -180,7 +275,11 @@
 		li	t1,ST0_CU0|0x1f;                \
 		or	t0,t1;                          \
 		xori	t0,0x1e;                        \
-		mtc0	t0,CP0_STATUS
+		.set	push;				\
+		.set	noreorder;			\
+		mtc0	t0,CP0_STATUS;			\
+		SYNC_AFTER_MTC0;			\
+		.set	pop
 
 /*
  * Just move to kernel mode and leave interrupts as they are.
@@ -191,6 +290,10 @@
 		li	t1,ST0_CU0|0x1e;                \
 		or	t0,t1;                          \
 		xori	t0,0x1e;                        \
-		mtc0	t0,CP0_STATUS
+		.set	push;				\
+		.set	noreorder;			\
+		mtc0	t0,CP0_STATUS;			\
+		SYNC_AFTER_MTC0;			\
+		.set	pop
 
 #endif /* __ASM_MIPS_STACKFRAME_H */

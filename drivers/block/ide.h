@@ -14,6 +14,10 @@
 #include <linux/proc_fs.h>
 #include <asm/ide.h>
 
+#ifdef CONFIG_PS2_HDD
+#include "ps2ide.h"
+#endif
+
 /*
  * This is the multiple IDE interface driver, as evolved from hd.c.
  * It supports up to four IDE interfaces, on one or more IRQs (usually 14 & 15).
@@ -243,8 +247,12 @@ typedef struct ide_drive_s {
 	byte 		usage;		/* current "open()" count for drive */
 	byte 		head;		/* "real" number of heads */
 	byte		sect;		/* "real" sectors per track */
-	byte		bios_head;	/* BIOS/fdisk/LILO number of heads */
-	byte		bios_sect;	/* BIOS/fdisk/LILO sectors per track */
+	/*
+	 * HACK: enforce alignment for sake of IDE CDROM driver on
+	 * architectures with strict alignment rules.
+	 */
+	byte		bios_head __attribute__ ((aligned (8)));	/* BIOS/fdisk/LILO number of heads */
+	byte		bios_sect __attribute__ ((aligned (8)));	/* BIOS/fdisk/LILO sectors per track */
 	unsigned short	bios_cyl;	/* BIOS/fdisk/LILO number of cyls */
 	unsigned short	cyl;		/* "real" number of cyls */
 	unsigned int	drive_data;	/* for use by tuneproc/selectproc as needed */

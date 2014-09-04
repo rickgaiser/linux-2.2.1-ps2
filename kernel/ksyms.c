@@ -67,7 +67,14 @@ __attribute__((section("__ksymtab"))) = {
 };
 #endif
 
-
+#ifdef CONFIG_BLK_DEV_LVM_MODULE
+   extern int (*lvm_map_ptr) ( int, kdev_t *, unsigned long *,
+                               unsigned long, int);
+   extern void (*lvm_hd_name_ptr) ( char*, int);
+   EXPORT_SYMBOL(lvm_map_ptr);
+   EXPORT_SYMBOL(lvm_hd_name_ptr);
+#endif
+ 
 #ifdef CONFIG_KMOD
 EXPORT_SYMBOL(request_module);
 #endif
@@ -319,6 +326,7 @@ EXPORT_SYMBOL(printk);
 EXPORT_SYMBOL(sprintf);
 EXPORT_SYMBOL(vsprintf);
 EXPORT_SYMBOL(kdevname);
+EXPORT_SYMBOL(bdevname);
 EXPORT_SYMBOL(simple_strtoul);
 EXPORT_SYMBOL(system_utsname);	/* UTS data */
 EXPORT_SYMBOL(uts_sem);		/* UTS semaphore */
@@ -332,6 +340,9 @@ EXPORT_SYMBOL(_ctype);
 EXPORT_SYMBOL(secure_tcp_sequence_number);
 EXPORT_SYMBOL(get_random_bytes);
 EXPORT_SYMBOL(securebits);
+#if defined(CONFIG_PS2) && defined(CONFIG_USB)
+EXPORT_SYMBOL(daemonize);
+#endif
 
 /* Program loader interfaces */
 EXPORT_SYMBOL(setup_arg_pages);
@@ -391,3 +402,71 @@ EXPORT_SYMBOL(get_fast_time);
 
 /* library functions */
 EXPORT_SYMBOL(strnicmp);
+
+#ifdef  CONFIG_KSYMTAB_MODULE
+/*
+ *  kernel symbol support
+ */
+#include <linux/ksymtab.h>
+#include <linux/file.h>
+#include <linux/module.h>
+
+static int ksymtab_get_entries_nr (void);
+static unsigned long ksymtab_find_symbol (unsigned long addr,
+                char *symbol, int sz, struct module **mod);
+
+EXPORT_SYMBOL(module_list);
+EXPORT_SYMBOL(close_fp);
+EXPORT_SYMBOL(put_unused_fd);
+struct ksymtab_methods ksymtab_methods = {
+	valid:0, 
+	once:0, 
+	get_entries_nr:ksymtab_get_entries_nr,
+	find_symbol:ksymtab_find_symbol,};
+EXPORT_SYMBOL(ksymtab_methods);
+
+/* Wrapper of get_entries_nr() */
+static int ksymtab_get_entries_nr (void)
+{
+	int t;
+	unsigned long save_flags;
+
+	init_lock_once_only(&ksymtab_methods.once,
+				&ksymtab_methods.lock);
+	spin_lock_irqsave (&ksymtab_methos.lock, save_flags);
+
+	if (! ksymtab_methods.valid ) {
+		/* ksymtab modules is not available */
+		t = -1;
+		goto out;
+	}
+	t = (*ksymtab_methods.internal_get_entries_nr)();
+out:
+	spin_unlock_irqrestore (&ksymtab_methos.lock, save_flags);
+	return t;
+}
+
+/* Wrapper of find_symbol() */
+static unsigned long ksymtab_find_symbol (unsigned long addr,
+                char *symbol, int sz, struct module **mod)
+{
+	unsigned long t;
+	unsigned long save_flags;
+
+	init_lock_once_only(&ksymtab_methods.once,
+				&ksymtab_methods.lock);
+	spin_lock_irqsave (&ksymtab_methos.lock, save_flags);
+
+	if (! ksymtab_methods.valid ) {
+		/* ksymtab modules is not available */
+		*symbol='\0';
+		t =  addr;
+		goto out;
+	}
+	t = (*ksymtab_methods.internal_find_symbol) (
+					addr, symbol, sz, mod);
+out:
+	spin_unlock_irqrestore (&ksymtab_methos.lock, save_flags);
+	return t;
+}
+#endif

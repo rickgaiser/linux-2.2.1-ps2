@@ -1046,7 +1046,9 @@ sys_ssetmask(int newmask)
 
 	return old;
 }
+#endif /* !defined(__alpha__) */
 
+#if !defined(__alpha__) && !defined(__mips__)
 /*
  * For backwards compatibility.  Functionality superseded by sigaction.
  */
@@ -1063,4 +1065,4 @@ sys_signal(int sig, __sighandler_t handler)
 
 	return ret ? ret : (unsigned long)old_sa.sa.sa_handler;
 }
-#endif /* !alpha */
+#endif /* !defined(__alpha__) && !defined(__mips__) */

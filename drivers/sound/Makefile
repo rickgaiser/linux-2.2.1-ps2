@@ -162,28 +162,28 @@ include $(TOPDIR)/Rules.make
 # Link rules for multi-part drivers.
 
 sound.o: $(sound-objs)
-	$(LD) -r -o $@ $(sound-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(sound-objs)
 
 soundcore.o: $(soundcore-objs)
-	$(LD) -r -o $@ $(soundcore-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(soundcore-objs)
 
 gus.o: $(gus-objs)
-	$(LD) -r -o $@ $(gus-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(gus-objs)
 
 pas2.o: $(pas2-objs)
-	$(LD) -r -o $@ $(pas2-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(pas2-objs)
 
 sb.o: $(sb-objs)
-	$(LD) -r -o $@ $(sb-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(sb-objs)
 
 softoss2.o: $(softoss2-objs)
-	$(LD) -r -o $@ $(softoss2-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(softoss2-objs)
 
 vidc_mod.o: $(vidc_mod-objs)
-	$(LD) -r -o $@ $(vidc_mod-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(vidc_mod-objs)
 
 wavefront.o: $(wavefront-objs)
-	$(LD) -r -o $@ $(wavefront-objs)
+	$(LD) $(LD_RFLAG) -r -o $@ $(wavefront-objs)
 
 # Firmware files that need translation
 #

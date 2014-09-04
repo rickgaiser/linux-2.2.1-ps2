@@ -282,7 +282,7 @@ extern void zap_page_range(struct mm_struct *mm, unsigned long address, unsigned
 extern int copy_page_range(struct mm_struct *dst, struct mm_struct *src, struct vm_area_struct *vma);
 extern int remap_page_range(unsigned long from, unsigned long to, unsigned long size, pgprot_t prot);
 extern int zeromap_page_range(unsigned long from, unsigned long size, pgprot_t prot);
-
+extern int vmap_page_range (unsigned long from, unsigned long size, unsigned long vaddr);
 extern void vmtruncate(struct inode * inode, unsigned long offset);
 extern int handle_mm_fault(struct task_struct *tsk,struct vm_area_struct *vma, unsigned long address, int write_access);
 extern void make_pages_present(unsigned long addr, unsigned long end);
@@ -326,6 +326,7 @@ extern void put_cached_page(unsigned long);
 #define __GFP_IO	0x10
 #define __GFP_SWAP	0x20
 
+#define __GFP_UNCACHED	0x40
 #define __GFP_DMA	0x80
 
 #define GFP_BUFFER	(__GFP_LOW | __GFP_WAIT)
@@ -335,10 +336,20 @@ extern void put_cached_page(unsigned long);
 #define GFP_NFS		(__GFP_HIGH | __GFP_WAIT | __GFP_IO)
 #define GFP_KSWAPD	(__GFP_IO | __GFP_SWAP)
 
+/* Flag - indicates that the buffer should be allocated uncached as for an
+   architecture where the caches don't snoop DMA access.  This is a even
+   stricter requirement than GFP_DMA as GFP_DMA allocated buffers might be
+   writeback cacheable and not be suitable for use with devices like
+   networks cards which manipulate objects smaller than a cacheline. */
+
+#define GFP_UNCACHED	__GFP_UNCACHED
+
 /* Flag - indicates that the buffer will be suitable for DMA.  Ignored on some
    platforms, used as appropriate on others */
 
 #define GFP_DMA		__GFP_DMA
+
+#define GFP_LEVEL_MASK 0xf
 
 /*
  * Decide if we should try to do some swapout..

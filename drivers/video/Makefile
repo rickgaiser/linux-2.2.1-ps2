@@ -19,6 +19,32 @@ MOD_LIST_NAME := VIDEO_MODULES
 CONFIG_FBGEN_BUILTIN :=
 CONFIG_FBGEN_MODULE :=
 
+ifeq ($(CONFIG_PS2_GSCON),y)
+  L_OBJS += ps2con.o fonts.o ps2dev.o ps2gs.o
+  L_OBJS += ps2dma.o ps2mem.o ps2event.o ps2image.o
+  ifeq ($(CONFIG_FONT_8x8),y)
+    L_OBJS += font_8x8.o
+  endif
+  ifeq ($(CONFIG_FONT_8x16),y)
+    L_OBJS += font_8x16.o
+  endif
+  ifeq ($(CONFIG_FONT_SUN8x16),y)
+    L_OBJS += font_sun8x16.o
+  endif
+  ifeq ($(CONFIG_FONT_SUN12x22),y)
+    L_OBJS += font_sun12x22.o
+  endif
+  ifeq ($(CONFIG_FONT_6x11),y)
+    L_OBJS += font_6x11.o
+  endif
+  ifeq ($(CONFIG_FONT_ACORN_8x8),y)
+    L_OBJS += font_acorn_8x8.o
+  endif
+  ifeq ($(CONFIG_FONT_PEARL_8x8),y)
+    L_OBJS += font_pearl_8x8.o
+  endif
+endif
+
 # Frame Buffer Console
 
 ifeq ($(CONFIG_FB),y)
@@ -188,6 +214,10 @@ else
   ifeq ($(CONFIG_FB_VIRGE),m)
   M_OBJS += virgefb.o
   endif
+endif
+
+ifdef CONFIG_FB_G364
+L_OBJS := $(L_OBJS) g364fb.o
 endif
 
 ifdef CONFIG_FB_G364
@@ -459,6 +489,16 @@ L_OBJS += mdacon.o
 else
   ifeq ($(CONFIG_MDA_CONSOLE),m)
   M_OBJS += mdacon.o
+  endif
+endif
+
+# Newport Text Console
+
+ifeq ($(CONFIG_SGI_NEWPORT_CONSOLE),y)
+L_OBJS += newport_con.o vga_font.o
+else
+  ifeq ($(CONFIG_SGI_NEWPORT_CONSOLE),m)
+  M_OBJS += newport_con.o vga_font.o
   endif
 endif
 

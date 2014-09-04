@@ -51,10 +51,10 @@ endif
 include $(TOPDIR)/Rules.make
 
 fd1772_mod.o: $(FLOPPY)
-	$(LD) -r -o $@ $(FLOPPY)
+	$(LD) $(LD_RFLAG) -r -o $@ $(FLOPPY)
 
 mfmhd_mod.o: mfmhd.o mfm.o
-	$(LD) -r -o $@ mfmhd.o mfm.o
+	$(LD) $(LD_RFLAG) -r -o $@ mfmhd.o mfm.o
 
 %.o: %.S
 ifndef $(CONFIG_BINUTILS_NEW)

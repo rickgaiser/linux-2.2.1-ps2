@@ -23,9 +23,9 @@ struct semaphore {
 #define MUTEX ((struct semaphore) { ATOMIC_INIT(1), ATOMIC_INIT(0), NULL })
 #define MUTEX_LOCKED ((struct semaphore) { ATOMIC_INIT(0), ATOMIC_INIT(0), NULL })
 
-extern void __down(struct semaphore * sem);
-extern int  __down_interruptible(struct semaphore * sem);
-extern void __up(struct semaphore * sem);
+asmlinkage void __down(struct semaphore * sem);
+asmlinkage int  __down_interruptible(struct semaphore * sem);
+asmlinkage void __up(struct semaphore * sem);
 
 extern spinlock_t semaphore_wake_lock;
 
@@ -47,6 +47,16 @@ static inline int waking_non_zero(struct semaphore *sem, struct task_struct *tsk
 {
 	int ret, tmp;
 
+#if _MIPS_ISA == 1
+	ret = 0;
+	save_flags(tmp);
+	cli();
+	if (atomic_read(&sem->waking) > 0) {
+		atomic_dec(&sem->waking);
+		ret = 1;
+	}
+	restore_flags(tmp);
+#else
 	__asm__ __volatile__(
 	"1:\tll\t%1,%2\n"
 	"blez\t%1,2f\n\t"
@@ -57,6 +67,7 @@ static inline int waking_non_zero(struct semaphore *sem, struct task_struct *tsk
 	".text"
 	: "=r"(ret), "=r"(tmp), "=m"(__atomic_fool_gcc(&sem->waking))
 	: "0"(0));
+#endif
 
 	return ret;
 }

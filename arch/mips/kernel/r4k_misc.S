@@ -6,7 +6,9 @@
  * Multi-cpu abstraction and reworking:
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  *
- * $Id: r4k_misc.S,v 1.3 1997/09/07 04:51:07 ralf Exp $
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
+ *
+ * $Id: r4k_misc.S,v 1.4 1997/12/01 17:57:30 ralf Exp $
  */
 #include <asm/asm.h>
 #include <asm/current.h>
@@ -22,6 +24,9 @@
 #include <asm/processor.h>
 #include <asm/regdef.h>
 #include <asm/stackframe.h>
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+#include <linux/tst_dev.h>
+#endif
 
 #undef NOTLB_OPTIMIZE /* If you are paranoid, define this. */
 
@@ -144,7 +149,8 @@ invalid_tlbl:
 #ifndef NOTLB_OPTIMIZE
 	/* Test present bit in entry. */
 	LOAD_PTE(k0, k1)
-	R5K_HAZARD
+	bltz	k0, nopage_tlbl		# for SPR
+	 R5K_HAZARD
 	tlbp
 	PTE_PRESENT(k0, k1, nopage_tlbl)
 	PTE_MAKEVALID(k0, k1)
@@ -154,6 +160,9 @@ invalid_tlbl:
 	 tlbwi
 1:
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
 	eret
 #endif
 
@@ -166,7 +175,8 @@ nopage_tlbl:
 	.set	noat
 #ifndef NOTLB_OPTIMIZE
 	LOAD_PTE(k0, k1)
-	R5K_HAZARD
+	bltz	k0, nopage_tlbs		# for SPR
+	 R5K_HAZARD
 	tlbp				# find faulting entry
 	PTE_WRITABLE(k0, k1, nopage_tlbs)
 	PTE_MAKEWRITE(k0, k1)
@@ -176,6 +186,9 @@ nopage_tlbl:
 	 tlbwi
 1:
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
 	eret
 #endif
 
@@ -188,7 +201,8 @@ nopage_tlbs:
 	.set	noat
 #ifndef NOTLB_OPTIMIZE
 	LOAD_PTE(k0, k1)
-	R5K_HAZARD
+	bltz	k0, nowrite_mod		# for SPR
+	 R5K_HAZARD
 	tlbp					# find faulting entry
 	andi	k0, k0, _PAGE_WRITE
 	beqz	k0, nowrite_mod
@@ -208,6 +222,9 @@ nopage_tlbs:
 	 tlbwi
 1:
 	nop
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	li k1, _TST_ACCESS_MAGIC
+#endif
 	eret
 #endif
 

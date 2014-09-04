@@ -529,7 +529,11 @@ static unsigned long get_wchan(struct task_struct *p)
 		return ((unsigned long *)schedule_frame)[12];
 	    }
 	    return pc;
-	}	
+	}
+#elif defined(__mips__)
+	{
+		return mips_get_wchan(p);
+	}
 #elif defined(__mc68000__)
 	{
 	    unsigned long fp, pc;
@@ -592,6 +596,7 @@ static unsigned long get_wchan(struct task_struct *p)
 		} while (++count < 16);
 	}
 #endif
+
 	return 0;
 }
 
@@ -628,6 +633,12 @@ static unsigned long get_wchan(struct task_struct *p)
 #elif defined(__sparc__)
 # define KSTK_EIP(tsk)  ((tsk)->tss.kregs->pc)
 # define KSTK_ESP(tsk)  ((tsk)->tss.kregs->u_regs[UREG_FP])
+#elif defined(__mips__)
+# define KSTK_PTREG(tsk) ((struct pt_regs *) \
+	((unsigned long)(tsk) - sizeof(struct pt_regs) \
+	  + KERNEL_STACK_SIZE - 32))
+# define KSTK_EIP(tsk)	(KSTK_PTREG(tsk)->cp0_epc)
+# define KSTK_ESP(tsk)	(get_gpreg ( KSTK_PTREG(tsk), 31 ))
 #endif
 
 /* Gcc optimizes away "strlen(x)" for constant x */
@@ -1024,9 +1035,12 @@ static int get_statm(int pid, char * buffer)
 				trs += pages;	/* text */
 			else if (vma->vm_flags & VM_GROWSDOWN)
 				drs += pages;	/* stack */
-			else if (vma->vm_end > 0x60000000)
-				lrs += pages;	/* library */
-			else
+			else if (!vma->vm_file) 
+				drs += pages;	/* heap */
+			else if (vma->vm_flags & VM_EXEC) {
+				lrs += pages;   /* shlib */
+				trs += pages;	/* text */
+			} else
 				drs += pages;
 			vma = vma->vm_next;
 		}
@@ -1060,14 +1074,160 @@ static int get_statm(int pid, char * buffer)
 /* for systems with sizeof(void*) == 4: */
 #define MAPS_LINE_FORMAT4	  "%08lx-%08lx %s %08lx %s %lu"
 #define MAPS_LINE_MAX4	49 /* sum of 8  1  8  1 4 1 8 1 5 1 10 1 */
+#define STATMAPS_LINE_FORMAT4  "%05x %05x %05x %05x %05x %08lx-%08lx %s %08lx %s %lu"
+#define STATMAPS_LINE_MAX4	79 /* sum of 5 1 5 1 5 1 5 1 8  1  8  1 4 1 8 1 5 1 10 1 */
 
 /* for systems with sizeof(void*) == 8: */
 #define MAPS_LINE_FORMAT8	  "%016lx-%016lx %s %016lx %s %lu"
 #define MAPS_LINE_MAX8	73 /* sum of 16  1  16  1 4 1 16 1 5 1 10 1 */
+#define STATMAPS_LINE_FORMAT8	  "%08x %08x %08x %08x %08x %016lx-%016lx %s %016lx %s %lu"
+#define STATMAPS_LINE_MAX8	118 /* sum of 8 1 8 1 8 1 8 1 16  1  16  1 4 1 16 1 5 1 10 1 */
 
 #define MAPS_LINE_MAX	MAPS_LINE_MAX8
+#define STATMAPS_LINE_MAX	STATMAPS_LINE_MAX8
 
 
+static ssize_t read_statmaps (int pid, struct file * file, char * buf,
+			  size_t count, loff_t *ppos)
+{
+	struct task_struct *p;
+	struct vm_area_struct * map, * next;
+	char * destptr = buf, * buffer;
+	loff_t lineno;
+	ssize_t column, i;
+	int volatile_task;
+	long retval;
+
+	/*
+	 * We might sleep getting the page, so get it first.
+	 */
+	retval = -ENOMEM;
+	buffer = (char*)__get_free_page(GFP_KERNEL);
+	if (!buffer)
+		goto out;
+
+	retval = -EINVAL;
+	read_lock(&tasklist_lock);
+	p = find_task_by_pid(pid);
+	read_unlock(&tasklist_lock);	/* FIXME!! This should be done after the last use */
+	if (!p)
+		goto freepage_out;
+
+	if (!p->mm || p->mm == &init_mm || count == 0)
+		goto getlen_out;
+
+	/* Check whether the mmaps could change if we sleep */
+	volatile_task = (p != current || atomic_read(&p->mm->count) > 1);
+
+	/* decode f_pos */
+	lineno = *ppos >> MAPS_LINE_SHIFT;
+	column = *ppos & (MAPS_LINE_LENGTH-1);
+
+	/* quickly go to line lineno */
+	for (map = p->mm->mmap, i = 0; map && (i < lineno); map = map->vm_next, i++)
+		continue;
+
+	for ( ; map ; map = next ) {
+		/* produce the next line */
+		char *line;
+		char str[5], *cp = str;
+		int flags;
+		kdev_t dev;
+		unsigned long ino;
+		int maxlen = (sizeof(void*) == 4) ?
+			STATMAPS_LINE_MAX4 :  STATMAPS_LINE_MAX8;
+		int len;
+
+		unsigned int trs, lrs, drs, share, dt;
+		unsigned int size, resident;
+		unsigned int nopte;
+		pgd_t *pgd;
+
+		size = resident = 0;
+		trs = lrs = drs = share = dt = 0;
+		pgd = pgd_offset(p->mm, map->vm_start);
+		statm_pgd_range(pgd, map->vm_start, 
+				map->vm_end, &resident, &share, &dt, &size);
+		nopte = ((map->vm_end - map->vm_start)>>PAGE_SHIFT)-size;
+
+		/*
+		 * Get the next vma now (but it won't be used if we sleep).
+		 */
+		next = map->vm_next;
+		flags = map->vm_flags;
+
+		*cp++ = flags & VM_READ ? 'r' : '-';
+		*cp++ = flags & VM_WRITE ? 'w' : '-';
+		*cp++ = flags & VM_EXEC ? 'x' : '-';
+		*cp++ = flags & VM_MAYSHARE ? 's' : 'p';
+		*cp++ = 0;
+
+		dev = 0;
+		ino = 0;
+		if (map->vm_file != NULL) {
+			dev = map->vm_file->f_dentry->d_inode->i_dev;
+			ino = map->vm_file->f_dentry->d_inode->i_ino;
+			line = d_path(map->vm_file->f_dentry, buffer, PAGE_SIZE);
+			buffer[PAGE_SIZE-1] = '\n';
+			line -= maxlen;
+			if(line < buffer)
+				line = buffer;
+		} else
+			line = buffer;
+
+		len = sprintf(line,
+			      sizeof(void*) == 4 ? STATMAPS_LINE_FORMAT4 
+			      			: STATMAPS_LINE_FORMAT8,
+			      nopte, size, resident, share, dt,
+			      map->vm_start, map->vm_end, str, map->vm_offset,
+			      kdevname(dev), ino);
+
+		if(map->vm_file) {
+			for(i = len; i < maxlen; i++)
+				line[i] = ' ';
+			len = buffer + PAGE_SIZE - line;
+		} else
+			line[len++] = '\n';
+		if (column >= len) {
+			column = 0; /* continue with next line at column 0 */
+			lineno++;
+			continue; /* we haven't slept */
+		}
+
+		i = len-column;
+		if (i > count)
+			i = count;
+		copy_to_user(destptr, line+column, i); /* may have slept */
+		destptr += i;
+		count   -= i;
+		column  += i;
+		if (column >= len) {
+			column = 0; /* next time: next line at column 0 */
+			lineno++;
+		}
+
+		/* done? */
+		if (count == 0)
+			break;
+
+		/* By writing to user space, we might have slept.
+		 * Stop the loop, to avoid a race condition.
+		 */
+		if (volatile_task)
+			break;
+	}
+
+	/* encode f_pos */
+	*ppos = (lineno << MAPS_LINE_SHIFT) + column;
+
+getlen_out:
+	retval = destptr - buf;
+
+freepage_out:
+	free_page((unsigned long)buffer);
+out:
+	return retval;
+}
 static ssize_t read_maps (int pid, struct file * file, char * buf,
 			  size_t count, loff_t *ppos)
 {
@@ -1243,6 +1403,7 @@ extern int get_locks_status (char *, char **, off_t, int);
 extern int get_swaparea_info (char *);
 extern int get_hardware_list(char *);
 extern int get_stram_list(char *);
+extern int get_ps2sysconf(char *);
 
 static long get_root_array(char * page, int type, char **start,
 	off_t offset, unsigned long length)
@@ -1325,6 +1486,10 @@ static long get_root_array(char * page, int type, char **start,
 		case PROC_RTC:
 			return get_rtc_status(page);
 #endif
+#ifdef CONFIG_SGI_DS1286
+		case PROC_RTC:
+			return get_ds1286_status(page);
+#endif
 		case PROC_LOCKS:
 			return get_locks_status(page, start, offset, length);
 #ifdef CONFIG_PROC_HARDWARE
@@ -1334,6 +1499,10 @@ static long get_root_array(char * page, int type, char **start,
 #ifdef CONFIG_STRAM_PROC
 		case PROC_STRAM:
 			return get_stram_list(page);
+#endif
+#ifdef CONFIG_PS2
+		case PROC_PS2SYSCONF:
+			return get_ps2sysconf(page);
 #endif
 	}
 	return -EBADF;
@@ -1370,6 +1539,7 @@ static int process_unauthorized(int type, int pid)
 		case PROC_PID_STATM:
 		case PROC_PID_STAT:
 		case PROC_PID_MAPS:
+		case PROC_PID_STATMAPS:
 		case PROC_PID_CMDLINE:
 		case PROC_PID_CPU:
 			return 0;	
@@ -1511,6 +1681,8 @@ static ssize_t arraylong_read(struct file * file, char * buf,
 	unsigned int type = inode->i_ino & 0x0000ffff;
 
 	switch (type) {
+		case PROC_PID_STATMAPS:
+			return read_statmaps(pid, file, buf, count, ppos);
 		case PROC_PID_MAPS:
 			return read_maps(pid, file, buf, count, ppos);
 	}

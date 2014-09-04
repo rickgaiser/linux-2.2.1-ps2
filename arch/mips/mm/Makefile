@@ -8,10 +8,22 @@
 # Note 2! The CFLAGS definition is now in the main makefile...
 
 O_TARGET := mm.o
+ifdef CONFIG_PS2
+O_OBJS	 := extable.o init.o fault.o r5900.o loadmmu.o
+else
 O_OBJS	 := extable.o init.o fault.o r4xx0.o r2300.o r6000.o tfp.o \
-            andes.o loadmmu.o
+            andes.o r5900.o loadmmu.o
+endif
+
+ifdef CONFIG_PS2
+O_OBJS   += ioremap.o
+endif
 
 ifdef CONFIG_SGI
+O_OBJS   += umap.o
+endif
+
+ifdef CONFIG_BAGET_MIPS
 O_OBJS   += umap.o
 endif
 

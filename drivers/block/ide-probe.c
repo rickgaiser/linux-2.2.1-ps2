@@ -124,6 +124,11 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 			case ide_tape:
 				printk ("TAPE");
 				break;
+			case 0x07:	/* ide_optical (ATAPI MO support) */
+				printk ("OPTICAL");
+				drive->removable = 1;
+				type = ide_floppy;
+				break;
 			default:
 				printk("UNKNOWN (type %d)", type);
 				break;
@@ -564,7 +569,11 @@ static int init_irq (ide_hwif_t *hwif)
 	 * Allocate the irq, if not already obtained for another hwif
 	 */
 	if (!match || match->irq != hwif->irq) {
+#ifdef CONFIG_PS2
+		int sa = SA_INTERRUPT|SA_SHIRQ;
+#else
 		int sa = (hwif->chipset == ide_pci) ? SA_INTERRUPT|SA_SHIRQ : SA_INTERRUPT;
+#endif
 		if (ide_request_irq(hwif->irq, &ide_intr, sa, hwif->name, hwgroup)) {
 			if (!match)
 				kfree(hwgroup);

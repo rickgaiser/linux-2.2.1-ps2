@@ -1,4 +1,4 @@
-/* $Id: system.h,v 1.8 1998/07/20 17:52:21 ralf Exp $
+/* $Id: system.h,v 1.9 1999/05/01 10:08:19 harald Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -12,6 +12,7 @@
 
 #include <asm/sgidefs.h>
 #include <linux/kernel.h>
+#include <linux/config.h>
 
 extern __inline__ void
 __sti(void)
@@ -23,6 +24,9 @@ __sti(void)
 		"ori\t$1,0x1f\n\t"
 		"xori\t$1,0x1e\n\t"
 		"mtc0\t$1,$12\n\t"
+#ifdef CONFIG_CPU_R5900
+		"sync.p\n\t"
+#endif
 		".set\tat\n\t"
 		".set\treorder"
 		: /* no outputs */
@@ -47,9 +51,13 @@ __cli(void)
 		"ori\t$1,1\n\t"
 		"xori\t$1,1\n\t"
 		"mtc0\t$1,$12\n\t"
+#ifdef CONFIG_CPU_R5900
+		"sync.p\n\t"
+#else
 		"nop\n\t"
 		"nop\n\t"
 		"nop\n\t"
+#endif
 		".set\tat\n\t"
 		".set\treorder"
 		: /* no outputs */
@@ -66,6 +74,23 @@ __asm__ __volatile__(                    \
 	: /* no inputs */                \
 	: "memory")
 
+#ifdef CONFIG_CPU_R5900
+#define __save_and_cli(x)                \
+__asm__ __volatile__(                    \
+	".set\tnoreorder\n\t"            \
+	".set\tnoat\n\t"                 \
+	"mfc0\t%0,$12\n\t"               \
+	"ori\t$1,%0,1\n\t"               \
+	"xori\t$1,1\n\t"                 \
+	"mtc0\t$1,$12\n\t"               \
+	"sync.p\n\t"               \
+	".set\tat\n\t"                   \
+	".set\treorder"                  \
+	: "=r" (x)                       \
+	: /* no inputs */                \
+	: "$1", "memory")
+
+#else
 #define __save_and_cli(x)                \
 __asm__ __volatile__(                    \
 	".set\tnoreorder\n\t"            \
@@ -82,20 +107,31 @@ __asm__ __volatile__(                    \
 	: "=r" (x)                       \
 	: /* no inputs */                \
 	: "$1", "memory")
+#endif
 
 extern void __inline__
 __restore_flags(int flags)
 {
 	__asm__ __volatile__(
 		".set\tnoreorder\n\t"
+		"mfc0\t$8,$12\n\t"
+		"li\t$9,0xff00\n\t"
+		"and\t$8,$9\n\t"
+		"nor\t$9,$0,$9\n\t"
+		"and\t%0,$9\n\t"
+		"or\t%0,$8\n\t"
 		"mtc0\t%0,$12\n\t"
+#ifdef CONFIG_CPU_R5900
+		"sync.p\n\t"
+#else
 		"nop\n\t"
 		"nop\n\t"
 		"nop\n\t"
+#endif
 		".set\treorder"
 		: /* no output */
 		: "r" (flags)
-		: "memory");
+		: "$8", "$9", "memory");
 }
 
 /*
@@ -107,6 +143,9 @@ __restore_flags(int flags)
 #define save_and_cli(x) __save_and_cli(x)
 #define restore_flags(x) __restore_flags(x)
 
+/*
+ * These are probably defined overly paranoid ...
+ */
 #define mb()						\
 __asm__ __volatile__(					\
 	"# prevent instructions being moved around\n\t"	\
@@ -117,6 +156,8 @@ __asm__ __volatile__(					\
 	: /* no output */				\
 	: /* no input */				\
 	: "memory")
+#define rmb() mb()
+#define wmb() mb()
 
 #if !defined (_LANGUAGE_ASSEMBLY)
 /*
@@ -162,9 +203,9 @@ extern __inline__ unsigned long xchg_u32(volatile int * m, unsigned long val)
 	retval = *m;
 	*m = val;
 	restore_flags(flags);
+	return retval;
 
 #endif /* Processor-dependent optimization */
-	return val;
 }
 
 /*

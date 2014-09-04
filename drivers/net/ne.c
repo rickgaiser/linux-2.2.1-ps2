@@ -52,10 +52,18 @@ static const char *version =
 #include <linux/etherdevice.h>
 #include "8390.h"
 
+#ifdef CONFIG_PS2
+#include <asm/ps2/irq.h>
+#endif
+
 /* Some defines that people can play with if so inclined. */
 
 /* Do we support clones that don't adhere to 14,15 of the SAprom ? */
+#ifdef CONFIG_PS2
+/* #define SUPPORT_NE_BAD_CLONES */
+#else
 #define SUPPORT_NE_BAD_CLONES
+#endif
 
 /* Do we perform extra sanity checks on stuff ? */
 /* #define NE_SANITY_CHECK */
@@ -69,7 +77,11 @@ static const char *version =
 /* A zero-terminated list of I/O addresses to be probed at boot. */
 #ifndef MODULE
 static unsigned int netcard_portlist[] __initdata = { 
+#ifdef CONFIG_PS2
+	0xb4000300, 0
+#else
 	0x300, 0x280, 0x320, 0x340, 0x360, 0x380, 0
+#endif
 };
 #endif
 
@@ -242,6 +254,10 @@ __initfunc(static int ne_probe_pci(struct device *dev))
 }
 #endif  /* CONFIG_PCI */
 
+#ifdef CONFIG_PS2
+extern int ps2_pccard_present;
+#endif
+
 __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 {
 	int i;
@@ -253,6 +269,12 @@ __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 	int reg0 = inb_p(ioaddr);
 	static unsigned version_printed = 0;
 
+#ifdef CONFIG_PS2
+	if ((ps2_pccard_present & 0xff00) != 0x0300)
+		return ENODEV;
+	dev->base_addr = ioaddr;
+	dev->mem_end = 0xbad;
+#endif
 	if (reg0 == 0xFF)
 		return ENODEV;
 
@@ -348,6 +370,12 @@ __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 		if (SA_prom[i] != SA_prom[i+1])
 			wordlength = 1;
 	}
+#ifdef CONFIG_PS2
+	/* The deteciton of wordlength (just before this) may fail, 
+		for Corega PCC-TX */
+	if (ps2_pccard_present == 0x0301)
+		wordlength = 2;
+#endif
 
 	/* At this point, wordlength *only* tells us if the SA_prom is doubled
 	   up or not because some broken PCI cards don't respect the byte-wide
@@ -439,6 +467,9 @@ __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 		   or don't know which one to set. */
 		dev->irq = 9;
 
+#ifdef CONFIG_PS2
+	dev->irq = IRQ_SBUS_PCIC;
+#endif
 	if (! dev->irq) {
 		printk(" failed to detect IRQ line.\n");
 		return EAGAIN;
@@ -467,6 +498,14 @@ __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 	dev->base_addr = ioaddr;
 	request_region(ioaddr, NE_IO_EXTENT, name);
 
+#ifdef CONFIG_PS2
+	if (ps2_pccard_present == 0x0301) {
+		for (i = 0; i < ETHER_ADDR_LEN; i++) {
+			printk(" %2.2x", inb(ioaddr + 0x14 + i));
+			dev->dev_addr[i] = inb(ioaddr + 0x14 + i);
+		}
+	} else
+#endif
 	for(i = 0; i < ETHER_ADDR_LEN; i++) {
 		printk(" %2.2x", SA_prom[i]);
 		dev->dev_addr[i] = SA_prom[i];
@@ -479,6 +518,10 @@ __initfunc(static int ne_probe1(struct device *dev, int ioaddr))
 	ei_status.tx_start_page = start_page;
 	ei_status.stop_page = stop_page;
 	ei_status.word16 = (wordlength == 2);
+#ifdef CONFIG_PS2
+	if (ps2_pccard_present == 0x0300)
+		ei_status.word16 = 0;
+#endif
 
 	ei_status.rx_start_page = start_page + TX_PAGES;
 #ifdef PACKETBUF_MEMSIZE
@@ -520,7 +563,7 @@ static void ne_reset_8390(struct device *dev)
 	unsigned long reset_start_time = jiffies;
 
 	if (ei_debug > 1)
-		printk(KERN_DEBUG "resetting the 8390 t=%ld...", jiffies);
+		printk(KERN_DEBUG "resetting the 8390 t=%ld...\n", jiffies);
 
 	/* DON'T change these to inb_p/outb_p or reset will fail on clones. */
 	outb(inb(NE_BASE + NE_RESET), NE_BASE + NE_RESET);
@@ -535,6 +578,8 @@ static void ne_reset_8390(struct device *dev)
 			break;
 		}
 	outb_p(ENISR_RESET, NE_BASE + EN0_ISR);	/* Ack intr. */
+	if (ei_debug > 1)
+		printk(KERN_DEBUG "...done\n");
 }
 
 /* Grab the 8390 specific header. Similar to the block_input routine, but

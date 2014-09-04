@@ -46,6 +46,8 @@ struct blk_dev_struct {
 	struct request		*current_request;
 	struct request   plug;
 	struct tq_struct plug_tq;
+	/* for segmented partition */
+	struct gendisk	*gd;
 };
 
 struct sec_size {

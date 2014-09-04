@@ -26,8 +26,8 @@
 #include <asm/io.h>
 #include <asm/bugs.h>
 
-#ifdef CONFIG_PCI
-#include <linux/pci.h>
+#ifdef CONFIG_SGI
+#include <asm/sgialib.h>
 #endif
 
 #ifdef CONFIG_DIO
@@ -69,6 +69,7 @@ extern void kswapd_setup(void);
 extern void init_IRQ(void);
 extern void init_modules(void);
 extern long console_init(long, long);
+extern void init_inventory(void);
 extern void sock_init(void);
 extern void uidcache_init(void);
 extern void mca_init(void);
@@ -82,6 +83,10 @@ extern void device_setup(void);
 extern void binfmt_setup(void);
 extern void free_initmem(void);
 extern void filesystem_setup(void);
+
+#ifdef CONFIG_TC
+extern void tc_init(void);
+#endif
 
 #ifdef CONFIG_ARCH_ACORN
 extern void ecard_init(void);
@@ -191,6 +196,9 @@ extern void scsi_logging_setup(char *str, int *ints);
 extern void sound_setup(char *str, int *ints);
 extern void reboot_setup(char *str, int *ints);
 extern void video_setup(char *str, int *ints);
+#ifdef CONFIG_PS2_GSCON
+extern void ps2crtmode_setup(char *str, int *ints);
+#endif
 #ifdef CONFIG_CDU31A
 extern void cdu31a_setup(char *str, int *ints);
 #endif CONFIG_CDU31A
@@ -318,19 +326,30 @@ extern void nfs_root_setup(char *str, int *ints);
 #ifdef CONFIG_FTAPE
 extern void ftape_setup(char *str, int *ints);
 #endif
+#if defined(CONFIG_QUOTA)
+extern void dquot_init_hash(void);
+#endif
 #ifdef CONFIG_MDA_CONSOLE
 extern void mdacon_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_LTPC
 extern void ltpc_setup(char *str, int *ints);
 #endif
+#ifdef CONFIG_PS2
+extern void ps2_dev_init(void);
+#endif
 
 #if defined(CONFIG_SYSVIPC)
 extern void ipc_init(void);
 #endif
-#if defined(CONFIG_QUOTA)
-extern void dquot_init_hash(void);
+#ifdef CONFIG_MIPS_JAZZ
+#include <asm/jazzdma.h>
 #endif
+#ifdef CONFIG_REMOTE_DEBUG
+#include <asm/gdb-stub.h>
+#endif
+
+extern int serial_console;
 
 #ifdef CONFIG_MD_BOOT
 extern void md_setup(char *str,int *ints) __init;
@@ -387,6 +406,9 @@ static void __init profile_setup(char *str, int *ints)
 		prof_shift = 2;
 }
 
+#ifdef CONFIG_PCI
+#include <linux/pci.h>
+#endif
 
 static struct dev_name_struct {
 	const char *name;
@@ -491,6 +513,17 @@ static struct dev_name_struct {
 #if CONFIG_DDV
 	{ "ddv", DDV_MAJOR << 8},
 #endif
+#if defined(CONFIG_BLK_DEV_LOOP)
+	{ "loop", LOOP_MAJOR  << 8},
+	{ "loop0", LOOP_MAJOR  << 8},
+	{ "loop1", (LOOP_MAJOR  << 8) | 1},
+	{ "loop2", (LOOP_MAJOR  << 8) | 2},
+	{ "loop3", (LOOP_MAJOR  << 8) | 3},
+	{ "loop4", (LOOP_MAJOR  << 8) | 4},
+	{ "loop5", (LOOP_MAJOR  << 8) | 5},
+	{ "loop6", (LOOP_MAJOR  << 8) | 6},
+	{ "loop7", (LOOP_MAJOR  << 8) | 7},
+#endif
 	{ NULL, 0 }
 };
 
@@ -530,6 +563,12 @@ struct kernel_param {
 	void (*setup_func)(char *, int *);
 };
 
+#ifdef CONFIG_PS2
+void dummy_setup(char *dummy0, int *dummy1)
+{
+}
+#endif
+
 static struct kernel_param cooked_params[] __initdata = {
 /* FIXME: make PNP just become reserve_setup */
 #ifndef CONFIG_KERNEL_PNP_RESOURCE
@@ -566,6 +605,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 #ifdef CONFIG_MDA_CONSOLE
 	{ "mdacon=", mdacon_setup },
+#endif
+#ifdef CONFIG_PS2_GSCON
+	{ "crtmode=", ps2crtmode_setup },
 #endif
 #ifdef CONFIG_VT
 	{ "kbd-reset", kbd_reset_setup },
@@ -779,7 +821,7 @@ static struct kernel_param cooked_params[] __initdata = {
         { "53c7xx=", ncr53c7xx_setup },
 #endif
 #if defined(CONFIG_A3000_SCSI) || defined(CONFIG_A2091_SCSI) \
-	    || defined(CONFIG_GVP11_SCSI)
+	    || defined(CONFIG_GVP11_SCSI) || defined(CONFIG_SCSI_SGIWD93)
 	{ "wd33c93=", wd33c93_setup },
 #endif
 #if defined(CONFIG_GVP11_SCSI)
@@ -841,6 +883,11 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 #ifdef CONFIG_LTPC
 	{ "ltpc=", ltpc_setup },
+#endif
+#ifdef CONFIG_PS2
+	{ "ps2_lang=", dummy_setup },
+	{ "ps2_rtver=", dummy_setup },
+	{ "ps2_rcparams=", dummy_setup },
 #endif
 	{ 0, 0 }
 };
@@ -1138,15 +1185,25 @@ asmlinkage void __init start_kernel(void)
 		memset(prof_buffer, 0, prof_len * sizeof(unsigned int));
 	}
 
+#ifdef CONFIG_REMOTE_DEBUG
+	set_debug_traps();
+	/* breakpoint(); */	/* execute a BREAK insn */
+#endif
 	memory_start = kmem_cache_init(memory_start, memory_end);
 	sti();
 	calibrate_delay();
+#ifdef CONFIG_CPU_R5900
+	r5900_init();
+#endif
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok && initrd_start < memory_start) {
 		printk(KERN_CRIT "initrd overwritten (0x%08lx < 0x%08lx) - "
 		    "disabling it.\n",initrd_start,memory_start);
 		initrd_start = 0;
 	}
+#endif
+#ifdef CONFIG_BINFMT_IRIX
+	init_inventory ();
 #endif
 	mem_init(memory_start,memory_end);
 	kmem_cache_sizes_init();
@@ -1262,6 +1319,12 @@ static void __init do_basic_setup(void)
 #endif
 #ifdef CONFIG_DIO
 	dio_init();
+#endif
+#ifdef CONFIG_TC
+	tc_init();
+#endif
+#ifdef CONFIG_PS2
+	ps2_dev_init();	/* PlayStation 2 devices */
 #endif
 
 	/* Networking initialization needs a process context */ 

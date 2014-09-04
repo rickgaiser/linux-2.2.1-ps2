@@ -3,13 +3,42 @@
  *
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  * Copyright (C) 1998 Ralf Baechle
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  *
- * $Id: asmmacro.h,v 1.2 1998/05/01 01:35:44 ralf Exp $
+ * $Id: asmmacro.h,v 1.3 1998/03/27 04:47:58 ralf Exp $
  */
 #ifndef __MIPS_ASMMACRO_H
 #define __MIPS_ASMMACRO_H
 
+#include <linux/autoconf.h>
 #include <asm/offset.h>
+#ifdef CONFIG_CONTEXT_R5900
+#include <asm/r5900_offset.h>
+#define S_GREG sq
+#define L_GREG lq
+
+/* save fp_acc: clobber $f0 */
+/* 	madd.s: $f0 = fpacc + 0.0f * 0.0f */
+#define	FPU_SAVE_EXTRA(thread)			\
+	mtc1    $0,$f0;				\
+	madd.s  $f0,$f0,$f0;			\
+	swc1	$f0,(THREAD_FPU_ACC)(thread);	\
+	lwc1	$f0,(THREAD_FPU + 0x000)(thread)
+
+/* restore fp_acc: clobber $f0 and $f1 */
+/* 	adda.s: fpacc <- $f0 + 0.0f */
+#define	FPU_RESTORE_EXTRA(thread)		\
+	lwc1	$f0,(THREAD_FPU_ACC)(thread); 	\
+	mtc1    $0,$f1;				\
+	adda.s  $f1,$f0
+#else
+
+#define S_GREG sw
+#define L_GREG lw
+#define	FPU_SAVE_EXTRA(thread)
+#define	FPU_RESTORE_EXTRA(thread)
+
+#endif
 
 #define FPU_SAVE_16EVEN(thread, tmp) \
 	cfc1	tmp,  fcr31;                    \
@@ -82,6 +111,7 @@
 	swc1	$f29, (THREAD_FPU + 0x0e8)(thread); \
 	swc1	$f30, (THREAD_FPU + 0x0f0)(thread); \
 	swc1	$f31, (THREAD_FPU + 0x0f8)(thread); \
+	FPU_SAVE_EXTRA(thread);                     \
 	sw	tmp,  (THREAD_FPU + 0x100)(thread)
 
 #define FPU_RESTORE_16EVEN(thread, tmp) \
@@ -123,6 +153,7 @@
 
 #define FPU_RESTORE(thread,tmp)                     \
 	lw	tmp,  (THREAD_FPU + 0x100)(thread); \
+	FPU_RESTORE_EXTRA(thread);                  \
 	lwc1	$f0,  (THREAD_FPU + 0x000)(thread); \
 	lwc1	$f1,  (THREAD_FPU + 0x008)(thread); \
 	lwc1	$f2,  (THREAD_FPU + 0x010)(thread); \
@@ -158,28 +189,28 @@
 	ctc1	tmp,  fcr31
 
 #define CPU_SAVE_NONSCRATCH(thread) \
-	sw	s0, THREAD_REG16(thread); \
-	sw	s1, THREAD_REG17(thread); \
-	sw	s2, THREAD_REG18(thread); \
-	sw	s3, THREAD_REG19(thread); \
-	sw	s4, THREAD_REG20(thread); \
-	sw	s5, THREAD_REG21(thread); \
-	sw	s6, THREAD_REG22(thread); \
-	sw	s7, THREAD_REG23(thread); \
-	sw	sp, THREAD_REG29(thread); \
-	sw	fp, THREAD_REG30(thread)
+	S_GREG	s0, THREAD_REG16(thread); \
+	S_GREG	s1, THREAD_REG17(thread); \
+	S_GREG	s2, THREAD_REG18(thread); \
+	S_GREG	s3, THREAD_REG19(thread); \
+	S_GREG	s4, THREAD_REG20(thread); \
+	S_GREG	s5, THREAD_REG21(thread); \
+	S_GREG	s6, THREAD_REG22(thread); \
+	S_GREG	s7, THREAD_REG23(thread); \
+	S_GREG	sp, THREAD_REG29(thread); \
+	S_GREG	fp, THREAD_REG30(thread)
 
 #define CPU_RESTORE_NONSCRATCH(thread) \
-	lw	s0, THREAD_REG16(thread); \
-	lw	s1, THREAD_REG17(thread); \
-	lw	s2, THREAD_REG18(thread); \
-	lw	s3, THREAD_REG19(thread); \
-	lw	s4, THREAD_REG20(thread); \
-	lw	s5, THREAD_REG21(thread); \
-	lw	s6, THREAD_REG22(thread); \
-	lw	s7, THREAD_REG23(thread); \
-	lw	sp, THREAD_REG29(thread); \
-	lw	fp, THREAD_REG30(thread); \
-	lw	ra, THREAD_REG31(thread)
+	L_GREG	s0, THREAD_REG16(thread); \
+	L_GREG	s1, THREAD_REG17(thread); \
+	L_GREG	s2, THREAD_REG18(thread); \
+	L_GREG	s3, THREAD_REG19(thread); \
+	L_GREG	s4, THREAD_REG20(thread); \
+	L_GREG	s5, THREAD_REG21(thread); \
+	L_GREG	s6, THREAD_REG22(thread); \
+	L_GREG	s7, THREAD_REG23(thread); \
+	L_GREG	sp, THREAD_REG29(thread); \
+	L_GREG	fp, THREAD_REG30(thread); \
+	L_GREG	ra, THREAD_REG31(thread)
 
 #endif /* !(__MIPS_ASMMACRO_H) */

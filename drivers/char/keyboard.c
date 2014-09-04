@@ -59,6 +59,8 @@
 #define KBD_DEFLOCK 0
 #endif
 
+void (*kbd_ledfunc)(unsigned int led) = NULL;
+
 extern void ctrl_alt_del(void);
 
 struct wait_queue * keypress_wait = NULL;
@@ -323,7 +325,22 @@ void handle_scancode(unsigned char scancode)
 	}
 }
 
+#ifdef CONFIG_FORWARD_KEYBOARD
+extern int forward_chars;
 
+void put_queue(int ch)
+{
+	if (forward_chars == fg_console+1){
+		kbd_forward_char (ch);
+	} else {
+		wake_up(&keypress_wait);
+		if (tty) {
+			tty_insert_flip_char(tty, ch, 0);
+			con_schedule_flip(tty);
+		}
+	}
+}
+#else
 void put_queue(int ch)
 {
 	wake_up(&keypress_wait);
@@ -332,6 +349,7 @@ void put_queue(int ch)
 		con_schedule_flip(tty);
 	}
 }
+#endif
 
 static void puts_queue(char *cp)
 {
@@ -889,7 +907,10 @@ static void kbd_bh(void)
 
 	if (leds != ledstate) {
 		ledstate = leds;
+#ifndef CONFIG_PS2
 		kbd_leds(leds);
+#endif
+		if (kbd_ledfunc) kbd_ledfunc(leds);
 	}
 }
 
@@ -911,8 +932,11 @@ __initfunc(int kbd_init(void))
 
 	ttytab = console_driver.table;
 
+#ifndef CONFIG_PS2
 	kbd_init_hw();
+#endif
 	init_bh(KEYBOARD_BH, kbd_bh);
 	mark_bh(KEYBOARD_BH);
+
 	return 0;
 }

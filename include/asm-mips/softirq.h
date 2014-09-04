@@ -1,10 +1,10 @@
-/* $Id: softirq.h,v 1.5 1998/08/29 21:20:22 ralf Exp $
+/* $Id: softirq.h,v 1.5 1999/02/15 02:22:12 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
- * Copyright (C) 1997, 1998 by Ralf Baechle
+ * Copyright (C) 1997, 1998, 1999 by Ralf Baechle
  */
 #ifndef __ASM_MIPS_SOFTIRQ_H
 #define __ASM_MIPS_SOFTIRQ_H
@@ -18,6 +18,12 @@ extern atomic_t __mips_bh_counter;
 extern unsigned int local_bh_count[NR_CPUS];
 
 #define get_active_bhs()	(bh_mask & bh_active)
+
+#if (_MIPS_ISA == _MIPS_ISA_MIPS1)
+
+#define clear_active_bhs(x)     atomic_clear_mask((x),&bh_active)
+
+#else
 
 static inline void clear_active_bhs(unsigned long x)
 {
@@ -34,17 +40,20 @@ static inline void clear_active_bhs(unsigned long x)
 		 "m" (bh_active));
 }
 
+#endif
+
 extern inline void init_bh(int nr, void (*routine)(void))
 {
 	bh_base[nr] = routine;
-	bh_mask_count[nr] = 0;
+	atomic_set(&bh_mask_count[nr], 0);
 	bh_mask |= 1 << nr;
 }
 
 extern inline void remove_bh(int nr)
 {
-	bh_base[nr] = NULL;
 	bh_mask &= ~(1 << nr);
+	mb();
+	bh_base[nr] = NULL;
 }
 
 extern inline void mark_bh(int nr)
@@ -59,12 +68,12 @@ extern inline void mark_bh(int nr)
 extern inline void disable_bh(int nr)
 {
 	bh_mask &= ~(1 << nr);
-	bh_mask_count[nr]++;
+	atomic_inc(&bh_mask_count[nr]);
 }
 
 extern inline void enable_bh(int nr)
 {
-	if (!--bh_mask_count[nr])
+	if (atomic_dec_and_test(&bh_mask_count[nr]))
 		bh_mask |= 1 << nr;
 }
 

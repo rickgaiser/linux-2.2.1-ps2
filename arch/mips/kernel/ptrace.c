@@ -1,4 +1,4 @@
-/* $Id: ptrace.c,v 1.11 1998/10/19 16:26:31 ralf Exp $
+/* $Id: ptrace.c,v 1.12 1999/06/13 16:30:32 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -24,6 +24,11 @@
 #include <asm/page.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
+#ifdef CONFIG_CONTEXT_R5900
+#include <asm/sys_r5900.h>
+#endif
+
+asmlinkage void (*save_fp)(struct task_struct *);
 
 /*
  * This routine gets a long from any process space by following the page
@@ -38,12 +43,17 @@ static unsigned long get_long(struct task_struct * tsk,
 	pmd_t *pgmiddle;
 	pte_t *pgtable;
 	unsigned long page, retval;
+	int fault;
 
 repeat:
 	pgdir = pgd_offset(vma->vm_mm, addr);
 	if (pgd_none(*pgdir)) {
-		handle_mm_fault(tsk, vma, addr, 0);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 0);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return 0;
 	}
 	if (pgd_bad(*pgdir)) {
 		printk("ptrace: bad page directory %08lx\n", pgd_val(*pgdir));
@@ -52,8 +62,12 @@ repeat:
 	}
 	pgmiddle = pmd_offset(pgdir, addr);
 	if (pmd_none(*pgmiddle)) {
-		handle_mm_fault(tsk, vma, addr, 0);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 0);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return 0;
 	}
 	if (pmd_bad(*pgmiddle)) {
 		printk("ptrace: bad page middle %08lx\n", pmd_val(*pgmiddle));
@@ -62,9 +76,14 @@ repeat:
 	}
 	pgtable = pte_offset(pgmiddle, addr);
 	if (!pte_present(*pgtable)) {
-		handle_mm_fault(tsk, vma, addr, 0);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 0);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return 0;
 	}
+
 	page = pte_page(*pgtable);
 	/* This is a hack for non-kernel-mapped video buffers and similar */
 	if (MAP_NR(page) >= MAP_NR(high_memory))
@@ -96,12 +115,17 @@ static void put_long(struct task_struct *tsk,
 	pmd_t *pgmiddle;
 	pte_t *pgtable;
 	unsigned long page;
+	int fault;
 
 repeat:
 	pgdir = pgd_offset(vma->vm_mm, addr);
 	if (!pgd_present(*pgdir)) {
-		handle_mm_fault(tsk, vma, addr, 1);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 1);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return;
 	}
 	if (pgd_bad(*pgdir)) {
 		printk("ptrace: bad page directory %08lx\n", pgd_val(*pgdir));
@@ -110,8 +134,12 @@ repeat:
 	}
 	pgmiddle = pmd_offset(pgdir, addr);
 	if (pmd_none(*pgmiddle)) {
-		handle_mm_fault(tsk, vma, addr, 1);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 1);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return;
 	}
 	if (pmd_bad(*pgmiddle)) {
 		printk("ptrace: bad page middle %08lx\n", pmd_val(*pgmiddle));
@@ -120,14 +148,23 @@ repeat:
 	}
 	pgtable = pte_offset(pgmiddle, addr);
 	if (!pte_present(*pgtable)) {
-		handle_mm_fault(tsk, vma, addr, 1);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 1);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return;
 	}
 	page = pte_page(*pgtable);
 	if (!pte_write(*pgtable)) {
-		handle_mm_fault(tsk, vma, addr, 1);
-		goto repeat;
+		fault = handle_mm_fault(tsk, vma, addr, 1);
+		if (fault > 0)
+			goto repeat;
+		if (fault < 0)
+			force_sig(SIGKILL, tsk);
+		return;
 	}
+
 	/* This is a hack for non-kernel-mapped video buffers and similar */
 	if (MAP_NR(page) < MAP_NR(high_memory))
 		flush_cache_all();
@@ -259,6 +296,7 @@ static int write_long(struct task_struct * tsk, unsigned long addr,
 asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 {
 	struct task_struct *child;
+	unsigned int flags;
 	int res;
 
 	lock_kernel();
@@ -267,28 +305,27 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	       (int) request, (int) pid, (unsigned long) addr,
 	       (unsigned long) data);
 #endif
+	res = -EPERM;
 	if (request == PTRACE_TRACEME) {
 		/* are we already being traced? */
-		if (current->flags & PF_PTRACED) {
-			res = -EPERM;
+		if (current->flags & PF_PTRACED)
 			goto out;
-		}
 		/* set the ptrace bit in the process flags. */
 		current->flags |= PF_PTRACED;
 		res = 0;
 		goto out;
 	}
-	if (pid == 1) {		/* you may not mess with init */
-		res = -EPERM;
-		goto out;
-	}
-	if (!(child = find_task_by_pid(pid))) {
-		res = -ESRCH;
-		goto out;
-	}
+	res = -ESRCH;
+	read_lock(&tasklist_lock);
+	child = find_task_by_pid(pid);
+	read_unlock(&tasklist_lock);    /* FIXME!!! */
+	if (!child)
+                goto out;
+        res = -EPERM;
+        if (pid == 1)           /* you may not mess with init */
+                goto out;
 	if (request == PTRACE_ATTACH) {
 		if (child == current) {
-			res = -EPERM;
 			goto out;
 		}
 		if ((!child->dumpable ||
@@ -297,55 +334,54 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		    (current->uid != child->uid) ||
 	 	    (current->gid != child->egid) ||
 		    (current->gid != child->sgid) ||
-	 	    (current->gid != child->gid)) && 
-		    !capable(CAP_SYS_PTRACE)) {
-			res = -EPERM;
+	 	    (current->gid != child->gid) ||
+		    (!cap_issubset(child->cap_permitted,
+		                  current->cap_permitted)) ||
+                    (current->gid != child->gid)) && !capable(CAP_SYS_PTRACE)){
 			goto out;
 		}
 		/* the same process cannot be attached many times */
-		if (child->flags & PF_PTRACED) {
-			res = -EPERM;
+		if (child->flags & PF_PTRACED)
 			goto out;
-		}
 		child->flags |= PF_PTRACED;
+
+		write_lock_irqsave(&tasklist_lock, flags);
 		if (child->p_pptr != current) {
 			REMOVE_LINKS(child);
 			child->p_pptr = current;
 			SET_LINKS(child);
 		}
+		write_unlock_irqrestore(&tasklist_lock, flags);
+
 		send_sig(SIGSTOP, child, 1);
 		res = 0;
 		goto out;
 	}
-	if (!(child->flags & PF_PTRACED)) {
-		res = -ESRCH;
+	res = -ESRCH;
+	if (!(child->flags & PF_PTRACED))
 		goto out;
-	}
 	if (child->state != TASK_STOPPED) {
-		if (request != PTRACE_KILL) {
-			res = -ESRCH;
+		if (request != PTRACE_KILL)
 			goto out;
-		}
 	}
-	if (child->p_pptr != current) {
-		res = -ESRCH;
+	if (child->p_pptr != current)
 		goto out;
-	}
 
 	switch (request) {
 	case PTRACE_PEEKTEXT: /* read word at location addr. */ 
 	case PTRACE_PEEKDATA: {
 		unsigned long tmp;
 
+		down(&child->mm->mmap_sem);
 		res = read_long(child, addr, &tmp);
+		up(&child->mm->mmap_sem);
 		if (res < 0)
 			goto out;
 		res = put_user(tmp,(unsigned long *) data);
 		goto out;
 		}
 
-	/* read the word at location addr in the USER area. */
-/* #define DEBUG_PEEKUSR */
+	/* Read the word at location addr in the USER area.  */
 	case PTRACE_PEEKUSR: {
 		struct pt_regs *regs;
 		unsigned long tmp;
@@ -353,113 +389,146 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		regs = (struct pt_regs *) ((unsigned long) child +
 		       KERNEL_STACK_SIZE - 32 - sizeof(struct pt_regs));
 		tmp = 0;  /* Default return value. */
-		if (addr < 32 && addr >= 0)
-			tmp = regs->regs[addr];
-		else if (addr >= 32 && addr < 64) {
-			unsigned long long *fregs;
 
+		switch(addr) {
+		case 0 ... 31:
+			tmp = get_gpreg(regs, addr);
+			break;
+		case FPC_CSR:
+		case FPR_BASE ... FPR_BASE + 31:
 			if (child->used_math) {
+				unsigned long long *fregs;
+
 				if (last_task_used_math == child) {
-					enable_cp1();
-					r4xx0_save_fp(child);
-					disable_cp1();
+					set_cp0_status(ST0_CU1, ST0_CU1);
+					save_fp(child);
+					set_cp0_status(ST0_CU1, 0);
 					last_task_used_math = NULL;
+					regs->cp0_status &= ~ST0_CU1;
 				}
-				fregs = (unsigned long long *)
+				if (addr==FPC_CSR) {
+				    tmp = child->tss.fpu.hard.control;
+				} else {
+				    fregs = (unsigned long long *)
 					&child->tss.fpu.hard.fp_regs[0];
-				tmp = (unsigned long) fregs[(addr - 32)];
+				    tmp = (unsigned long)fregs[addr - FPR_BASE];
+				}
 			} else {
-				tmp = -1;	/* FP not yet used  */
+				if (addr==FPC_CSR)
+				    tmp = 0;	/* FPU_DEFAULT */
+				else
+				    tmp = -1;	/* FP not yet used  */
 			}
-		} else {
-			addr -= 64;
-			switch(addr) {
-			case 0:
-				tmp = regs->cp0_epc;
-				break;
-			case 1:
-				tmp = regs->cp0_cause;
-				break;
-			case 2:
-				tmp = regs->cp0_badvaddr;
-				break;
-			case 3:
-				tmp = regs->lo;
-				break;
-			case 4:
-				tmp = regs->hi;
-				break;
-			case 5:
-				tmp = child->tss.fpu.hard.control;
-				break;
-			case 6:	/* implementation / version register */
-				tmp = 0;	/* XXX */
-				break;
-			default:
-				tmp = 0;
-				res = -EIO;
-				goto out;
-			}
+			break;
+		case PC:
+			tmp = regs->cp0_epc;
+			break;
+		case CAUSE:
+			tmp = regs->cp0_cause;
+			break;
+		case BADVADDR:
+			tmp = regs->cp0_badvaddr;
+			break;
+		case MMHI:
+#ifdef CONFIG_CONTEXT_R5900
+			tmp = *(__u32 *) &(regs->hi);
+#else
+			tmp = regs->hi;
+#endif
+			break;
+		case MMLO:
+#ifdef CONFIG_CONTEXT_R5900
+			tmp = *(__u32 *) &(regs->lo);
+#else
+			tmp = regs->lo;
+#endif
+			break;
+		case FPC_EIR:	/* implementation / version register */
+			set_cp0_status(ST0_CU1, ST0_CU1);
+			__asm__ ("cfc1	%0, $0" : "=r" (tmp));
+			set_cp0_status(ST0_CU1, 0);
+			break;
+		default:
+			tmp = 0;
+			res = -EIO;
+			goto out;
 		}
 		res = put_user(tmp, (unsigned long *) data);
 		goto out;
-		}
+	    }
 
 	case PTRACE_POKETEXT: /* write the word at location addr. */
 	case PTRACE_POKEDATA:
+		down(&child->mm->mmap_sem);
 		res = write_long(child,addr,data);
+		if (request == PTRACE_POKETEXT)
+			flush_cache_sigtramp((unsigned long) addr);
+		up(&child->mm->mmap_sem);
 		goto out;
 
 	case PTRACE_POKEUSR: {
+		unsigned long long *fregs;
 		struct pt_regs *regs;
-		int res = 0;
+		res = 0;
 
 		regs = (struct pt_regs *) ((unsigned long) child +
 		       KERNEL_STACK_SIZE - 32 - sizeof(struct pt_regs));
-		if (addr < 32 && addr >= 0)
-			regs->regs[addr] = data;
-		else if (addr >= 32 && addr < 64) {
-			unsigned long long *fregs;
-
+		switch (addr) {
+		case 0 ... 31:
+			set_gpreg(regs, addr, data);
+			break;
+		case FPC_CSR:
+		case FPR_BASE ... FPR_BASE + 31:
 			if (child->used_math) {
 				if (last_task_used_math == child) {
-					enable_cp1();
-					r4xx0_save_fp(child);
-					disable_cp1();
+					set_cp0_status(ST0_CU1, ST0_CU1);
+					save_fp(child);
+					set_cp0_status(ST0_CU1, 0);
 					last_task_used_math = NULL;
+					regs->cp0_status &= ~ST0_CU1;
 				}
 			} else {
 				/* FP not yet used  */
 				memset(&child->tss.fpu.hard, ~0,
 				       sizeof(child->tss.fpu.hard));
-				child->tss.fpu.hard.control = 0;
+				child->tss.fpu.hard.control
+						= 0; /* FPU_DEAFAULT */
+
+				/* Mark to preserve CHILD->TSS.FPU */
+				child->used_math = 1;
 			}
-			fregs = (unsigned long long *)
+			if (addr== FPC_CSR) {
+			    child->tss.fpu.hard.control = data;
+			} else {
+			    fregs = (unsigned long long *)
 				&child->tss.fpu.hard.fp_regs[0];
-			fregs[(addr - 32)] = (unsigned long long) data;
-		} else {
-			addr -= 64;
-			switch (addr) {
-			case 0:
-				regs->cp0_epc = data;
-				break;
-			case 3:
-				regs->lo = data;
-				break;
-			case 4:
-				regs->hi = data;
-				break;
-			case 5:
-				child->tss.fpu.hard.control = data;
-				break;
-			default:
-				/* The rest are not allowed. */
-				res = -EIO;
-				break;
-			};
+			    fregs[addr - FPR_BASE] = (unsigned long long) data;
+			}
+			break;
+		case PC:
+			regs->cp0_epc = data;
+			break;
+		case MMHI:
+#ifdef CONFIG_CONTEXT_R5900
+			*(__u32 *) &(regs->hi) = data;
+#else
+			regs->hi = data;
+#endif
+			break;
+		case MMLO:
+#ifdef CONFIG_CONTEXT_R5900
+			*(__u32 *) &(regs->lo) = data;
+#else
+			regs->lo = data;
+#endif
+			break;
+		default:
+			/* The rest are not allowed. */
+			res = -EIO;
+			break;
 		}
 		goto out;
-		}
+	    }
 
 	case PTRACE_SYSCALL: /* continue and stop at next (return from) syscall */
 	case PTRACE_CONT: { /* restart after signal. */
@@ -534,3 +603,196 @@ asmlinkage void syscall_trace(void)
 		current->exit_code = 0;
 	}
 }
+
+#ifdef CONFIG_CONTEXT_R5900
+/* Extended version of ptrace() */
+/* This provides functions for PEEK/POKE r5900 registers */
+int sys_r5900_ptrace(long request, long pid, 
+		struct sys_r5900_ptrace *user_param)
+{
+	struct task_struct *child;
+	int res;
+	struct sys_r5900_ptrace param;
+	r5900_reg_union *valp = &(param.reg);
+	long addr;
+
+
+	lock_kernel();
+	res = -ESRCH;
+	read_lock(&tasklist_lock);
+	child = find_task_by_pid(pid);
+	read_unlock(&tasklist_lock);    /* FIXME!!! */
+	if (!child)
+                goto out;
+        res = -EPERM;
+	if (pid == 1) {		/* you may not mess with init */
+		goto out;
+	}
+	res = -ESRCH;
+	if (!(child->flags & PF_PTRACED))
+		goto out;
+	if (child->state != TASK_STOPPED) {
+		if (request != PTRACE_KILL)
+			goto out;
+	}
+	if (child->p_pptr != current)
+		goto out;
+
+	if (copy_from_user(&param, user_param, sizeof(param))) {
+		res = -EFAULT;
+		goto out;
+	}
+	addr = param.addr;
+
+	switch (request) {
+	/* Read the word at location addr in the USER area.  */
+	case SYS_R5900_PTRACE_PEEKU: 
+	    {
+		struct pt_regs *regs;
+
+		regs = (struct pt_regs *) ((unsigned long) child +
+		       KERNEL_STACK_SIZE - 32 - sizeof(struct pt_regs));
+		valp->gp = 0;  /* Default return value. */
+
+		switch(addr) {
+		case 0 ... 31:
+			valp->gp = regs->regs[addr];
+			break;
+		case FPC_CSR:
+		case R5900_FPACC:
+		case FPR_BASE ... FPR_BASE + 31:
+			if (child->used_math) {
+				unsigned long long *fregs;
+
+				if (last_task_used_math == child) {
+					set_cp0_status(ST0_CU1, ST0_CU1);
+					save_fp(child);
+					set_cp0_status(ST0_CU1, 0);
+					last_task_used_math = NULL;
+					regs->cp0_status &= ~ST0_CU1;
+				}
+
+				if (addr == FPC_CSR) {
+				    valp->ctl = child->tss.fpu.hard.control;
+				} else if (addr == R5900_FPACC) {
+				    valp->ctl = child->tss.fpu.hard.fp_acc;
+				} else {
+				    fregs = (unsigned long long *)
+				        &child->tss.fpu.hard.fp_regs[0];
+				    valp->fp = 
+				        (unsigned long)fregs[addr - FPR_BASE];
+				}
+			} else {
+				if (addr == FPC_CSR)
+				    valp->ctl = 0;	/* FPU_DEFAULT */
+				else
+				    valp->fp = -1;	/* FP not yet used  */
+			}
+			break;
+		case PC:
+			valp->ctl = regs->cp0_epc;
+			break;
+		case CAUSE:
+			valp->ctl = regs->cp0_cause;
+			break;
+		case BADVADDR:
+			valp->ctl = regs->cp0_badvaddr;
+			break;
+		case MMHI:
+			valp->lohi = regs->hi;
+			break;
+		case MMLO:
+			valp->lohi = regs->lo;
+			break;
+		case FPC_EIR:	/* implementation / version register */
+			set_cp0_status(ST0_CU1, ST0_CU1);
+			__asm__ ("cfc1	%0, $0" : "=r" (valp->ctl));
+			set_cp0_status(ST0_CU1, 0);
+			break;
+		case R5900_SA:
+			valp->ctl = regs->sa;
+			break;
+		default:
+			valp->gp = 0;
+			res = -EIO;
+			goto out;
+		}
+		res = copy_to_user(user_param, &param, sizeof(param)) ;
+		goto out;
+
+	    }
+
+	case SYS_R5900_PTRACE_POKEU: 
+	    {
+		unsigned long long *fregs;
+		struct pt_regs *regs;
+
+		res = 0;
+		regs = (struct pt_regs *) ((unsigned long) child +
+		       KERNEL_STACK_SIZE - 32 - sizeof(struct pt_regs));
+		switch (addr) {
+		case 0 ... 31:
+			regs->regs[addr] = valp->gp;
+			break;
+		case FPC_CSR:
+		case R5900_FPACC:
+		case FPR_BASE ... FPR_BASE + 31:
+			if (child->used_math) {
+				if (last_task_used_math == child) {
+					set_cp0_status(ST0_CU1, ST0_CU1);
+					save_fp(child);
+					set_cp0_status(ST0_CU1, 0);
+					last_task_used_math = NULL;
+					regs->cp0_status &= ~ST0_CU1;
+				}
+			} else {
+				/* FP not yet used  */
+				memset(&child->tss.fpu.hard, ~0,
+				       sizeof(child->tss.fpu.hard));
+				child->tss.fpu.hard.control
+						= 0; /* FPU_DEAFAULT */
+
+				/* Mark to preserve CHILD->TSS.FPU */
+				child->used_math = 1;
+			}
+			if (addr== FPC_CSR) {
+			    child->tss.fpu.hard.control = valp->ctl;
+			} else if (addr == R5900_FPACC) {
+			    child->tss.fpu.hard.fp_acc = valp->fp;
+			} else {
+			    fregs = (unsigned long long *)
+				&child->tss.fpu.hard.fp_regs[0];
+			    fregs[addr - FPR_BASE] 
+					= (unsigned long long) valp->fp;
+			}
+			break;
+		case PC:
+			regs->cp0_epc = valp->ctl;
+			break;
+		case MMHI:
+			regs->hi = valp->lohi;
+			break;
+		case MMLO:
+			regs->lo = valp->lohi;
+			break;
+		case R5900_SA:
+			regs->sa = valp->ctl;
+			break;
+		default:
+			/* The rest are not allowed. */
+			res = -EIO;
+			break;
+		}
+		goto out;
+		
+	    }
+
+	default:
+		res = -EIO;
+		goto out;
+	}
+out:
+	unlock_kernel();
+	return res;
+}
+#endif /* CONFIG_CONTEXT_R5900 */

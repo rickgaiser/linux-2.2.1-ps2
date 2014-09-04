@@ -10,7 +10,7 @@
  * Multi-arch abstraction and asm macros for easier reading:
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  *
- * $Id: r4k_fpu.S,v 1.4 1998/04/04 13:59:38 ralf Exp $
+ * $Id: r4k_fpu.S,v 1.5 1999/05/01 22:40:36 ralf Exp $
  */
 #include <asm/asm.h>
 #include <asm/fpregdef.h>
@@ -32,7 +32,7 @@ LEAF(r4k_save_fp_context)
 	 sll	t2,t1,5
 
 	bgez	t2,1f
-	 cfc1	t1,fcr31
+	 cfc1	t1,fcr31	/* sync fpu also */
 	/* Store the 16 odd double precision registers */
 	EX(sdc1	$f1,(SC_FPREGS+8)(a0))
 	EX(sdc1	$f3,(SC_FPREGS+24)(a0))
@@ -79,11 +79,11 @@ LEAF(r4k_save_fp_context)
 	END(r4k_save_fp_context)
 
 /*
- * Restore fpu state:
+ * Restore FPU state:
  *  - fp gp registers
  *  - cp1 status/control register
  *
- * We base the decission which registers to restore from the signal stack
+ * We base the decision which registers to restore from the signal stack
  * frame on the current content of c0_status, not on the content of the
  * stack frame which might have been changed by the user.
  */

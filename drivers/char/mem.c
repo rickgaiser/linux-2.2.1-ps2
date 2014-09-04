@@ -51,6 +51,18 @@ extern void mda_console_init(void);
 #if defined(CONFIG_PPC) || defined(CONFIG_MAC)
 extern void adbdev_init(void);
 #endif
+#ifdef CONFIG_USB
+int usb_init(void);
+#endif
+#if defined (CONFIG_T10000)
+extern int ee_powctrl_init(void);
+#endif
+#ifdef CONFIG_MIPS_TST_DEV
+extern void tst_dev_init(void);
+#endif
+#ifdef CONFIG_PERF_DEV
+extern void perf_dev_init(void);
+#endif
 
 static ssize_t do_write_mem(struct file * file, void *p, unsigned long realp,
 			    const char * buf, size_t count, loff_t *ppos)
@@ -574,6 +586,13 @@ __initfunc(int chr_dev_init(void))
 	if (register_chrdev(MEM_MAJOR,"mem",&memory_fops))
 		printk("unable to get major %d for memory devs\n", MEM_MAJOR);
 	rand_initialize();
+
+#if defined (CONFIG_T10000)
+	ee_powctrl_init();
+#endif
+#if defined (CONFIG_PS2_GSCON)
+	ps2dev_init();
+#endif
 #if defined (CONFIG_FB)
 	fbmem_init();
 #endif
@@ -628,5 +647,18 @@ __initfunc(int chr_dev_init(void))
 #ifdef CONFIG_VIDEO_DEV
 	videodev_init();
 #endif
+#ifdef CONFIG_TESTDEV
+	testdev_init();
+#endif
+#ifdef CONFIG_MIPS_TST_DEV
+	tst_dev_init();
+#endif
+#ifdef CONFIG_PERF_DEV
+	perf_dev_init();
+#endif
+#ifdef CONFIG_USB
+	usb_init();
+#endif
+
 	return 0;
 }

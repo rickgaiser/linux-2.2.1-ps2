@@ -21,7 +21,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-
+#ifndef MAP_AUTOGROW
+#define MAP_AUTOGROW 0
+#endif
 
 char __depname[512] = "\n\t@touch ";
 #define depname (__depname+9)
@@ -193,7 +195,7 @@ void use_config(const char * name, int len)
  * Thus, there is one memory access per sizeof(unsigned long) characters.
  */
 
-#if defined(__alpha__) || defined(__i386__) || defined(__arm__)
+#if defined(__alpha__) || defined(__i386__) || defined(__MIPSEL__) || defined(__arm__)
 #define LE_MACHINE
 #endif
 
@@ -443,7 +445,7 @@ void do_depend(const char * filename, const char * command)
 
 	mapsize = st.st_size;
 	mapsize = (mapsize+pagesizem1) & ~pagesizem1;
-	map = mmap(NULL, mapsize, PROT_READ, MAP_PRIVATE, fd, 0);
+	map = mmap(NULL, mapsize, PROT_READ, MAP_AUTOGROW | MAP_PRIVATE, fd, 0);
 	if ((long) map == -1) {
 		perror("mkdep: mmap");
 		close(fd);

@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: aic7xxx.reg,v 1.4 1997/06/27 19:38:39 gibbs Exp $
+ *	$Id: aic7xxx.reg,v 1.6 1999/02/01 22:31:10 ralf Exp $
  */
 
 /*

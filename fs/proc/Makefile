@@ -28,4 +28,8 @@ ifeq ($(CONFIG_PROC_DEVICETREE),y)
 O_OBJS += proc_devtree.o
 endif
 
+ifeq ($(CONFIG_PS2),y)
+O_OBJS += ps2sysconf.o
+endif
+
 include $(TOPDIR)/Rules.make

@@ -1,4 +1,4 @@
-/* $Id: checksum.h,v 1.6 1998/09/16 13:30:51 ralf Exp $
+/* $Id: checksum.h,v 1.6 1998/09/19 19:19:36 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -9,6 +9,7 @@
 #ifndef __ASM_MIPS_CHECKSUM_H
 #define __ASM_MIPS_CHECKSUM_H
 
+#include<linux/autoconf.h>
 /*
  * computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit)
@@ -86,6 +87,44 @@ static inline unsigned short ip_fast_csum(unsigned char * iph,
 	/*
 	 * This is for 32-bit MIPS processors.
 	 */
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+	__asm__ __volatile__("
+	.set	noreorder
+	.set	noat
+	lw	%0,(%1)
+	subu	%2,4
+	#blez	%2,2f
+	sll	%2,2			# delay slot
+
+	lw	%3,4(%1)
+	addu	%2,%1			# delay slot
+	addu	%0,%3
+	sltu	$1,%0,%3
+	lw	%3,8(%1)
+	addu	%0,$1
+	addu	%0,%3
+	sltu	$1,%0,%3
+	lw	%3,12(%1)
+	addu	%0,$1
+	addu	%0,%3
+	sltu	$1,%0,%3
+	addu	%0,$1
+
+1:	
+	lw	%3,16(%1)
+	addiu	%1,4
+	addu	%0,%3
+	sltu	$1,%0,%3
+	nop
+	bne	%2,%1,1b
+	addu	%0,$1			# delay slot
+
+2:	.set	at
+	.set	reorder"
+	: "=&r" (sum), "=&r" (iph), "=&r" (ihl), "=&r" (dummy)
+	: "1" (iph), "2" (ihl)
+	: "$1");
+#else
 	__asm__ __volatile__("
 	.set	noreorder
 	.set	noat
@@ -120,6 +159,7 @@ static inline unsigned short ip_fast_csum(unsigned char * iph,
 	: "=&r" (sum), "=&r" (iph), "=&r" (ihl), "=&r" (dummy)
 	: "1" (iph), "2" (ihl)
 	: "$1");
+#endif
 
 	return csum_fold(sum);
 }
@@ -183,6 +223,7 @@ static inline unsigned short ip_compute_csum(unsigned char * buff, int len)
 	return csum_fold(csum_partial(buff, len, 0));
 }
 
+#if 0
 #define _HAVE_ARCH_IPV6_CSUM
 static __inline__ unsigned short int csum_ipv6_magic(struct in6_addr *saddr,
 						     struct in6_addr *daddr,
@@ -251,5 +292,6 @@ static __inline__ unsigned short int csum_ipv6_magic(struct in6_addr *saddr,
 
 	return csum_fold(sum);
 }
+#endif
 
 #endif /* __ASM_MIPS_CHECKSUM_H */

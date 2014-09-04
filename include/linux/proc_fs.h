@@ -52,7 +52,8 @@ enum root_directory_inos {
 	PROC_STRAM,
 	PROC_SOUND,
 	PROC_MTRR, /* whether enabled or not */
-	PROC_FS
+	PROC_FS,
+	PROC_PS2SYSCONF,
 };
 
 enum pid_directory_inos {
@@ -72,6 +73,7 @@ enum pid_directory_inos {
 	PROC_PID_RINGBUF,
 #endif
 	PROC_PID_CPU,
+	PROC_PID_STATMAPS,
 };
 
 enum pid_subdirectory_inos {
@@ -198,10 +200,14 @@ enum scsi_directory_inos {
 	PROC_SCSI_ATARI,
 	PROC_SCSI_MAC,
 	PROC_SCSI_IDESCSI,
+	PROC_SCSI_SGIWD93,
 	PROC_SCSI_MESH,
 	PROC_SCSI_53C94,
 	PROC_SCSI_PLUTO,
 	PROC_SCSI_INI9100U,
+#ifdef CONFIG_PS2
+        PROC_SCSI_USB,
+#endif
 	PROC_SCSI_SCSI_DEBUG,	
 	PROC_SCSI_NOT_PRESENT,
 	PROC_SCSI_FILE,                        /* I'm assuming here that we */

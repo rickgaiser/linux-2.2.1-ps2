@@ -233,12 +233,12 @@ char * strtok(char * s,const char * ct)
 #endif
 
 #ifndef __HAVE_ARCH_MEMSET
-void * memset(void * s,char c,size_t count)
+void * memset(void * s, int c, size_t count)
 {
 	char *xs = (char *) s;
 
 	while (count--)
-		*xs++ = c;
+		*xs++ = (char) c;
 
 	return s;
 }
@@ -310,14 +310,15 @@ int memcmp(const void * cs,const void * ct,size_t count)
 void * memscan(void * addr, int c, size_t size)
 {
 	unsigned char * p = (unsigned char *) addr;
+	unsigned char * e = p + size;
 
-	while (size) {
-		if (*p == c)
+	while (p != e) {
+		if (*p == (unsigned char)c)
 			return (void *) p;
 		p++;
-		size--;
 	}
-  	return (void *) p;
+
+	return (void *) p;
 }
 #endif
 

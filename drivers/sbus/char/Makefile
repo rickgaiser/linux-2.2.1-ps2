@@ -92,4 +92,4 @@ include $(TOPDIR)/Rules.make
 sunkbdmap.o: sunkeymap.c
 
 vfc.o: vfc_dev.o vfc_i2c.o
-	$(LD) -r -o vfc.o vfc_dev.o vfc_i2c.o
+	$(LD) $(LD_RFLAG) -r -o vfc.o vfc_dev.o vfc_i2c.o

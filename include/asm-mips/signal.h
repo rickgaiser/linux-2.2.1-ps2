@@ -1,4 +1,4 @@
-/* $Id: signal.h,v 1.4 1998/08/18 20:46:42 ralf Exp $
+/* $Id: signal.h,v 1.5 1998/08/25 09:22:01 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -74,16 +74,19 @@ typedef unsigned long old_sigset_t;		/* at least 32 bits */
  * SA_ONESHOT and SA_NOMASK are the historical Linux names for the Single
  * Unix names RESETHAND and NODEFER respectively.
  */
-#define SA_STACK	0x00000001
-#define SA_RESETHAND	0x00000002
-#define SA_RESTART	0x00000004
+#define SA_ONSTACK	0x08000000
+#define SA_RESETHAND	0x80000000
+#define SA_RESTART	0x10000000
 #define SA_SIGINFO	0x00000008
-#define SA_NODEFER	0x00000010
+#define SA_NODEFER	0x40000000
 #define SA_NOCLDWAIT	0x00010000	/* Not supported yet */
-#define SA_NOCLDSTOP	0x00020000
+#define SA_NOCLDSTOP	0x00000001
 
 #define SA_NOMASK	SA_NODEFER
 #define SA_ONESHOT	SA_RESETHAND
+#define SA_INTERRUPT	0x20000000	/* dummy -- ignored */
+
+#define SA_RESTORER	0x04000000
 
 /* 
  * sigaltstack controls
@@ -99,14 +102,13 @@ typedef unsigned long old_sigset_t;		/* at least 32 bits */
  * These values of sa_flags are used only by the kernel as part of the
  * irq handling routines.
  *
- * SA_INTERRUPT is a no-op, but left due to historical reasons. Use the
- * SA_RESTART flag to get restarting signals (which were the default long ago)
+ * SA_INTERRUPT is also used by the irq handling routines.
  * SA_SHIRQ flag is for shared interrupt support on PCI and EISA.
  */
-#define SA_INTERRUPT		0x01000000	/* interrupt handling */
-#define SA_SHIRQ		0x08000000
 #define SA_PROBE		SA_ONESHOT
 #define SA_SAMPLE_RANDOM	SA_RESTART
+#define SA_SHIRQ		0x02000000
+
 #endif /* __KERNEL__ */
 
 #define SIG_BLOCK	1	/* for blocking signals */

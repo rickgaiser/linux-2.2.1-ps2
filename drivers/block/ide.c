@@ -124,6 +124,10 @@
 #include <asm/io.h>
 #include <asm/bitops.h>
 
+#ifdef CONFIG_PS2
+#include <asm/ps2/irq.h>
+#endif
+
 #include "ide.h"
 #include "ide_modes.h"
 
@@ -1339,7 +1343,15 @@ void ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 	ide_hwif_t *hwif;
 	ide_drive_t *drive;
 	ide_handler_t *handler;
+#ifdef CONFIG_PS2
+	extern int ps2_pccard_present;
+#define SPD_R_INTR_STAT	((volatile u16 *)0xb4000028)
 
+	/* If HDD interrupt status is not asserted, just ignore it. */
+	if (ps2_pccard_present == 0x0100 && irq == IRQ_SBUS_PCIC
+		&& !(*SPD_R_INTR_STAT & 1))
+		return;
+#endif
 	__cli();	/* local CPU only */
 	spin_lock_irqsave(&hwgroup->spinlock, flags);
 	hwif = hwgroup->hwif;
@@ -1356,6 +1368,7 @@ void ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 		 * For PCI, we cannot tell the difference,
 		 * so in that case we just ignore it and hope it goes away.
 		 */
+#ifndef CONFIG_PS2
 #ifdef CONFIG_BLK_DEV_IDEPCI
 		if (IDE_PCI_DEVID_EQ(hwif->pci_devid, IDE_PCI_DEVID_NULL))
 #endif	/* CONFIG_BLK_DEV_IDEPCI */
@@ -1367,6 +1380,7 @@ void ide_intr (int irq, void *dev_id, struct pt_regs *regs)
 			(void)ide_ack_intr(hwif->io_ports[IDE_STATUS_OFFSET], hwif->io_ports[IDE_IRQ_OFFSET]);
 			unexpected_intr(irq, hwgroup);
 		}
+#endif /* !CONFIG_PS2 */
 		spin_unlock_irqrestore(&hwgroup->spinlock, flags);
 		return;
 	}
@@ -2389,6 +2403,7 @@ __initfunc(void ide_setup (char *s))
 				drive->bswap = 1;
 				goto done;
 			case 3: /* cyl,head,sect */
+
 				drive->media	= ide_disk;
 				drive->cyl	= drive->bios_cyl  = vals[0];
 				drive->head	= drive->bios_head = vals[1];
@@ -2590,47 +2605,18 @@ int ide_xlate_1024 (kdev_t i_rdev, int xparm, const char *msg)
 	if (!drive)
 		return 0;
 
-	if (drive->forced_geom) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
+	if (drive->forced_geom)
 		return 0;
-	}
 
-	if (xparm > 1 && xparm <= drive->bios_head && drive->bios_sect == 63) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
+	if (xparm > 1 && xparm <= drive->bios_head && drive->bios_sect == 63) 
 		return 0;		/* we already have a translation */
-	}
 
 	printk("%s ", msg);
 
-	if (xparm < 0 && (drive->bios_cyl * drive->bios_head * drive->bios_sect) < (1024 * 16 * 63)) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
+	if (xparm < 0 && (drive->bios_cyl * drive->bios_head * drive->bios_sect) < (1024 * 16 * 63)) 
 		return 0;		/* small disk: no translation needed */
-	}
 
-	if (drive->id) {
-		drive->cyl  = drive->id->cyls;
-		drive->head = drive->id->heads;
-		drive->sect = drive->id->sectors;
-	}
-	drive->bios_cyl  = drive->cyl;
-	drive->bios_head = drive->head;
-	drive->bios_sect = drive->sect;
-	drive->special.b.set_geometry = 1;
+	//drive->special.b.set_geometry = 1; 
 
 	tracks = drive->bios_cyl * drive->bios_head * drive->bios_sect / 63;
 	drive->bios_sect = 63;
@@ -2658,12 +2644,7 @@ int ide_xlate_1024 (kdev_t i_rdev, int xparm, const char *msg)
 	}
 	drive->part[0].nr_sects = current_capacity(drive);
 	printk("[%d/%d/%d]", drive->bios_cyl, drive->bios_head, drive->bios_sect);
-	/*
-	 * Update the current 3D drive values.
-	 */
-	drive->id->cur_cyls    = drive->bios_cyl;
-	drive->id->cur_heads   = drive->bios_head;
-	drive->id->cur_sectors = drive->bios_sect;
+
 	return 1;
 }
 

@@ -87,6 +87,8 @@
 #include <linux/if_pppvar.h>
 #include <linux/ppp-comp.h>
 
+#include <linux/spinlock.h>
+
 #ifdef CONFIG_KMOD
 #include <linux/kmod.h>
 #endif
@@ -826,10 +828,14 @@ ppp_async_send(struct ppp *ppp, struct sk_buff *skb)
  * Push as much data as possible out to the tty.
  * Returns 1 if we finished encoding the current frame, 0 otherwise.
  */
+
+spinlock_t ppp_lock = SPIN_LOCK_UNLOCKED;
+
 static int
 ppp_tty_push(struct ppp *ppp)
 {
 	int avail, sent, done = 0;
+	unsigned int flags;
 	struct tty_struct *tty = ppp2tty(ppp);
 
 	CHECK_PPP(0);
@@ -842,15 +848,20 @@ ppp_tty_push(struct ppp *ppp)
 		avail = ppp->olim - ppp->optr;
 		if (avail > 0) {
 			tty->flags |= (1 << TTY_DO_WRITE_WAKEUP);
+			spin_lock_irqsave (&ppp_lock, flags);
 			sent = tty->driver.write(tty, 0, ppp->optr, avail);
-			if (sent < 0)
+			if (sent < 0) {
+				spin_unlock_irqrestore (&ppp_lock, flags);
 				goto flush;	/* error, e.g. loss of CD */
+			}
 			ppp->stats.ppp_obytes += sent;
 			ppp->optr += sent;
 			if (sent < avail) {
 				ppp->tty_pushing = 0;
+				spin_unlock_irqrestore (&ppp_lock, flags);
 				return done;
 			}
+			spin_unlock_irqrestore (&ppp_lock, flags);
 		}
 		if (ppp->tpkt != 0)
 			done = ppp_async_encode(ppp);

@@ -63,6 +63,8 @@
 #define ACSI_MAJOR	28
 #define AZTECH_CDROM_MAJOR 29
 #define GRAPHDEV_MAJOR	29	/* SparcLinux & Linux/68k /dev/fb */
+#define SHMIQ_MAJOR	85	/* Linux/mips, SGI /dev/shmiq */
+#define USEMA_MAJOR	86	/* Linux/MIPS, SGI /dev/usema */
 #define CM206_CDROM_MAJOR 32
 #define IDE2_MAJOR	33
 #define IDE3_MAJOR	34
@@ -89,12 +91,31 @@
 #define SCSI_DISK6_MAJOR	70
 #define SCSI_DISK7_MAJOR	71
 
+#define LVM_BLK_MAJOR	58	/* Logical Volume Manager */
+
 #define SPECIALIX_NORMAL_MAJOR 75
 #define SPECIALIX_CALLOUT_MAJOR 76
+
+#define LVM_CHAR_MAJOR	109	/* Logical Volume Manager */
 
 #define UNIX98_PTY_MASTER_MAJOR	128
 #define UNIX98_PTY_MAJOR_COUNT	8
 #define UNIX98_PTY_SLAVE_MAJOR	(UNIX98_PTY_MASTER_MAJOR+UNIX98_PTY_MAJOR_COUNT)
+
+/*
+ * 60-63   LOCAL/EXPERIMENTAL
+ * 120-127 LOCAL/EXPERIMENTAL
+ * 240-254 LOCAL/EXPERIMENTAL
+ */
+
+
+#define PS2DEV_MAJOR	240	/* PS2 Graphics Synthesizer */
+#define PERFDEV_MAJOR	241	/* EE performance counter device */
+#define TSTDEV_MAJOR	242	/* MIPS1 test and set helper device */
+#define PS2CDVD_MAJOR	243	/* PS2 CD/DVD */
+#define PS2PAD_MAJOR	244	/* PS2 PAD */
+#define PS2MC_MAJOR	245	/* PS2 Memory Card */
+#define PS2POWCTRL_MAJOR	246	/* DTL-T10000 power control */
 
 /*
  * Tests for SCSI devices.

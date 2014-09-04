@@ -72,6 +72,13 @@ static const char *version =
 #define NS8390_CORE
 #include "8390.h"
 
+#ifdef CONFIG_PS2
+extern int ps2_pccard_present;
+/* fast recovery on rx overrun occured */
+#define NE_FAST_RECOVER
+/* fast recovery on tx trigger lost */
+#define NE_RETRIGGER_TX
+#endif
 #define BUG_83C690
 
 /* These are the operational function interfaces to board-specific
@@ -187,6 +194,60 @@ int ei_close(struct device *dev)
 	dev->start = 0;
 	return 0;
 }
+
+#if defined (NE_RETRIGGER_TX) && defined (EI_PINGPONG)
+
+
+/* Trigger_send() for the buffer sepcified WHICH,	*/
+/*	if trigger was lost but still EI_LOCAL->TXING.	*/
+/* Return 1, if success 				*/
+
+static int retrigger_tx(struct device *dev, int which)
+{
+	int e8390_base = dev->base_addr;
+	int send_length, output_page;
+	struct ei_device *ei_local = (struct ei_device *) dev->priv;
+	unsigned char is_txing;
+
+	/* setup trigger params */
+	output_page = ei_local->tx_start_page;
+	send_length = ei_local->tx1;
+	if (which!=1) {
+		output_page += TX_1X_PAGES;
+		send_length = ei_local->tx2;
+	}
+
+	/* santiy check */
+	if (send_length <= 0)  return 0;
+	if (ei_local->txing != 1) return 0;
+
+	/* conform trigger was really lost */
+	is_txing = inb_p (e8390_base+E8390_CMD) & E8390_TRANS;
+	if (is_txing) return 0; 
+
+	/* Now trigger */
+	NS8390_trigger_send (dev, send_length, output_page);
+	dev->trans_start = jiffies;
+
+	/* update ei_local state */
+	if (ei_debug>1)
+		printk(KERN_WARNING "%s: re-trigger:tx=%d lasttx=%d.\n", 
+			dev->name, which, ei_local->lasttx);
+
+	if (which==1) {
+		ei_local->tx1 = -1;
+		ei_local->lasttx = -1;
+	}
+	else 
+	{
+		ei_local->tx2 = -1;
+		ei_local->lasttx = -2;
+	}
+
+	return 1;
+}
+
+#endif /* defined (NE_RETRIGGER_TX) && defined (EI_PINGPONG) */
 
 static int ei_start_xmit(struct sk_buff *skb, struct device *dev)
 {
@@ -313,10 +374,25 @@ static int ei_start_xmit(struct sk_buff *skb, struct device *dev)
 	 * card, leaving a substantial gap between each transmitted packet.
 	 */
 
+#ifdef NE_RETRIGGER_TX
+	if (ei_local->txing && ei_local->tx1 == 0 
+	    && ei_local->tx2 == 0)  {
+		ei_local->txing = 0;
+		if (ei_debug>1)
+			printk(KERN_WARNING "%s: trun off TXING: lasttx=%d.\n", 
+				dev->name, ei_local->lasttx);
+	}
+#endif
 	if (ei_local->tx1 == 0) 
 	{
 		output_page = ei_local->tx_start_page;
 		ei_local->tx1 = send_length;
+#ifdef NE_RETRIGGER_TX
+		if ( ei_local->txing && ei_local->tx2>0 ) {
+		   retrigger_tx(dev,2);
+		}
+		else
+#endif
 		if (ei_debug  &&  ei_local->tx2 > 0)
 			printk(KERN_DEBUG "%s: idle transmitter tx2=%d, lasttx=%d, txing=%d.\n",
 				dev->name, ei_local->tx2, ei_local->lasttx, ei_local->txing);
@@ -325,6 +401,12 @@ static int ei_start_xmit(struct sk_buff *skb, struct device *dev)
 	{
 		output_page = ei_local->tx_start_page + TX_1X_PAGES;
 		ei_local->tx2 = send_length;
+#ifdef NE_RETRIGGER_TX
+		if ( ei_local->txing && ei_local->tx1>0 ) {
+		   retrigger_tx(dev,1);
+		}
+		else
+#endif
 		if (ei_debug  &&  ei_local->tx1 > 0)
 			printk(KERN_DEBUG "%s: idle transmitter, tx1=%d, lasttx=%d, txing=%d.\n",
 				dev->name, ei_local->tx1, ei_local->lasttx, ei_local->txing);
@@ -426,6 +508,7 @@ void ei_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 
 	if (dev->interrupt || ei_local->irqlock) 
 	{
+#if !defined(CONFIG_PS2)
 #if 1 /* This might just be an interrupt for a PCI device sharing this line */
 		/* The "irqlock" check is only for testing. */
 		printk(ei_local->irqlock
@@ -433,6 +516,7 @@ void ei_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 			   : "%s: Reentering the interrupt handler! isr=%#2x imr=%#2x.\n",
 			   dev->name, inb_p(e8390_base + EN0_ISR),
 			   inb_p(e8390_base + EN0_IMR));
+#endif
 #endif
 		spin_unlock(&ei_local->page_lock);
 		return;
@@ -580,7 +664,7 @@ static void ei_tx_intr(struct device *dev)
 		if (ei_local->tx2 > 0) 
 		{
 			ei_local->txing = 1;
-			NS8390_trigger_send(dev, ei_local->tx2, ei_local->tx_start_page + 6);
+			NS8390_trigger_send(dev, ei_local->tx2, ei_local->tx_start_page + TX_1X_PAGES);
 			dev->trans_start = jiffies;
 			ei_local->tx2 = -1,
 			ei_local->lasttx = 2;
@@ -605,8 +689,12 @@ static void ei_tx_intr(struct device *dev)
 		else
 			ei_local->lasttx = 10, ei_local->txing = 0;
 	}
-	else printk(KERN_WARNING "%s: unexpected TX-done interrupt, lasttx=%d.\n",
-			dev->name, ei_local->lasttx);
+	else {
+		ei_local->txing = 0;
+		printk(KERN_WARNING 
+			"%s: unexpected TX-done interrupt, lasttx=%d tx1=%d tx2=%d.\n",
+			dev->name, ei_local->lasttx, ei_local->tx1, ei_local->tx2);
+	}
 
 #else	/* EI_PINGPONG */
 	/*
@@ -749,7 +837,7 @@ static void ei_receive(struct device *dev)
 		
 		/* This _should_ never happen: it's here for avoiding bad clones. */
 		if (next_frame >= ei_local->stop_page) {
-			printk("%s: next frame inconsistency, %#2x\n", dev->name,
+			printk(KERN_WARNING "%s: next frame inconsistency, %#2x\n", dev->name,
 				   next_frame);
 			next_frame = ei_local->rx_start_page;
 		}
@@ -797,7 +885,28 @@ static void ei_rx_overrun(struct device *dev)
 	 * We wait at least 10ms.
 	 */
 
+#ifdef NE_FAST_RECOVER
+#ifdef CONFIG_PS2
+	if (ps2_pccard_present == 0x0301) /* XXX:fast_ether */  {
+	    if (was_txing) {
+		unsigned char tx_completed =
+		    inb_p(e8390_base+EN0_ISR) & (ENISR_TX+ENISR_TX_ERR);
+		if (!tx_completed) {
+			if (ei_debug > 1) {
+				printk(KERN_DEBUG 
+				"%s: Receiver overrun on transmitting.(%ld).\n",
+				dev->name, ei_local->stat.rx_over_errors);
+
+			}
+			udelay(1600);
+		}
+	    }
+	} else 
+#endif /* CONFIG_PS2 */
+	udelay(1600);
+#else  /* NE_FAST_RECOVER */
 	udelay(10*1000);
+#endif /* NE_FAST_RECOVER */
 
 	/*
 	 * Reset RBCR[01] back to zero as per magic incantation.

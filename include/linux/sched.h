@@ -475,6 +475,7 @@ extern void FASTCALL(wake_up_process(struct task_struct * tsk));
 #define wake_up(x)			__wake_up((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE)
 #define wake_up_interruptible(x)	__wake_up((x),TASK_INTERRUPTIBLE)
 
+extern void release(struct task_struct * p);
 extern int in_group_p(gid_t grp);
 
 extern void flush_signals(struct task_struct *);
@@ -537,13 +538,13 @@ static inline void recalc_sigpending(struct task_struct *t)
 static inline int on_sig_stack(unsigned long sp)
 {
 	return (sp >= current->sas_ss_sp
-		&& sp < current->sas_ss_sp + current->sas_ss_size);
+	        && sp < current->sas_ss_sp + current->sas_ss_size);
 }
 
 static inline int sas_ss_flags(unsigned long sp)
 {
 	return (current->sas_ss_size == 0 ? SS_DISABLE
-		: on_sig_stack(sp) ? SS_ONSTACK : 0);
+	       : on_sig_stack(sp) ? SS_ONSTACK : 0);
 }
 
 extern int request_irq(unsigned int irq,
@@ -625,6 +626,10 @@ extern void exit_mm(struct task_struct *);
 extern void exit_fs(struct task_struct *);
 extern void exit_files(struct task_struct *);
 extern void exit_sighand(struct task_struct *);
+
+#if defined(CONFIG_PS2) && defined(CONFIG_USB)
+extern void daemonize(void);
+#endif
 
 extern int do_execve(char *, char **, char **, struct pt_regs *);
 extern int do_fork(unsigned long, unsigned long, struct pt_regs *);

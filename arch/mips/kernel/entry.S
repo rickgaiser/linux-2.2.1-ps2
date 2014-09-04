@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1994, 1995 by Ralf Baechle
  *
- * $Id: entry.S,v 1.15 1998/10/14 20:26:26 ralf Exp $
+ * $Id: entry.S,v 1.14 1999/04/12 19:13:21 harald Exp $
  */
 
 /*
@@ -31,6 +31,9 @@
 #include <asm/regdef.h>
 #include <asm/fpregdef.h>
 #include <asm/unistd.h>
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+#include <linux/tst_dev.h>
+#endif
 
 /*
  * Heia ...  The %lo, %hi and %HI stuff is too strong for the ELF assembler
@@ -70,6 +73,9 @@ EXPORT(ret_from_irq)
 
 EXPORT(return)	.set	noat
 		RESTORE_ALL
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+		li k1, _TST_ACCESS_MAGIC
+#endif
 		eret
 		.set	at
 
@@ -146,7 +152,7 @@ EXPORT(exception_count_##exception);                                    \
 		BUILD_HANDLER(adel,ade,ade,silent)		/* #4  */
 		BUILD_HANDLER(ades,ade,ade,silent)		/* #5  */
 		BUILD_HANDLER(ibe,ibe,cli,verbose)		/* #6  */
-		BUILD_HANDLER(dbe,dbe,cli,verbose)		/* #7  */
+		BUILD_HANDLER(dbe,dbe,cli,silent)		/* #7  */
 		BUILD_HANDLER(bp,bp,sti,silent)			/* #9  */
 		BUILD_HANDLER(ri,ri,sti,silent)			/* #10 */
 		BUILD_HANDLER(cpu,cpu,sti,silent)		/* #11 */

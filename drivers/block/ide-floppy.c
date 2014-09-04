@@ -1480,8 +1480,10 @@ static int idefloppy_identify_device (ide_drive_t *drive,struct hd_driveid *id)
 
 	if (gcw.protocol != 2)
 		printk (KERN_ERR "ide-floppy: Protocol is not ATAPI\n");
+#if 0	/* ATAPI MO support */
 	else if (gcw.device_type != 0)
 		printk (KERN_ERR "ide-floppy: Device type is not set to floppy\n");
+#endif
 	else if (!gcw.removable)
 		printk (KERN_ERR "ide-floppy: The removable flag is not set\n");
 	else if (gcw.drq_type == 3) {

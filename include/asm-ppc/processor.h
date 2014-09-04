@@ -313,17 +313,19 @@ static inline unsigned long thread_saved_pc(struct thread_struct *t)
 int ll_printk(const char *, ...);
 void ll_puts(const char *);
 
-#define init_task	(init_task_union.task)
-#define init_stack	(init_task_union.stack)
-
 #endif /* ndef ASSEMBLY*/
 
-  
+#define init_task	(init_task_union.task)
+#define init_stack	(init_task_union.stack)
+ 
+/*
+ * Return_address is a replacement for __builtin_return_address(count)
+ * which on certain architectures cannot reasonably be implemented in GCC
+ * (MIPS, Alpha) or is unuseable with -fomit-frame-pointer (i386).
+ * Note that __builtin_return_address(x>=1) is forbidden because the GCC
+ * aborts compilation on some CPUs.  It's simply not possible to unwind
+ * some CPU's stackframes.
+ */
+#define return_address() __builtin_return_address(0)
+
 #endif /* __ASM_PPC_PROCESSOR_H */
-
-
-
-
-
-
-

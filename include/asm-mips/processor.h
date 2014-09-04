@@ -1,4 +1,4 @@
-/* $Id: processor.h,v 1.18 1998/10/14 20:31:12 ralf Exp $
+/* $Id: processor.h,v 1.15 1999/02/15 02:22:12 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -7,11 +7,14 @@
  * Copyright (C) 1994 Waldorf GMBH
  * Copyright (C) 1995, 1996, 1997, 1998 Ralf Baechle
  * Modified further for R[236]000 compatibility by Paul M. Antoine
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  */
 #ifndef __ASM_MIPS_PROCESSOR_H
 #define __ASM_MIPS_PROCESSOR_H
 
 #if !defined (_LANGUAGE_ASSEMBLY)
+#include <linux/autoconf.h>
+#include <linux/types.h>
 #include <asm/cachectl.h>
 #include <asm/mipsregs.h>
 #include <asm/reg.h>
@@ -86,6 +89,9 @@ extern struct task_struct *last_task_used_math;
 struct mips_fpu_hard_struct {
 	double fp_regs[NUM_FPU_REGS];
 	unsigned int control;
+#ifdef CONFIG_CONTEXT_R5900
+	float	fp_acc;
+#endif
 };
 
 /*
@@ -112,10 +118,17 @@ typedef struct {
  * If you change thread_struct remember to change the #defines below too!
  */
 struct thread_struct {
+#ifdef CONFIG_CONTEXT_R5900
+        /* Saved main processor registers. */
+        __u128 reg16;
+	__u128 reg17, reg18, reg19, reg20, reg21, reg22, reg23;
+        __u128 reg29, reg30, reg31;
+#else
         /* Saved main processor registers. */
         unsigned long reg16;
 	unsigned long reg17, reg18, reg19, reg20, reg21, reg22, reg23;
         unsigned long reg29, reg30, reg31;
+#endif
 
 	/* Saved cp0 stuff. */
 	unsigned long cp0_status;
@@ -142,6 +155,16 @@ struct thread_struct {
 #define INIT_MMAP { &init_mm, KSEG0, KSEG1, NULL, PAGE_SHARED, \
                     VM_READ | VM_WRITE | VM_EXEC, 1, NULL, NULL }
 
+#ifdef CONFIG_CONTEXT_R5900
+#define INIT_TSS  { 				\
+	cp0_status:0,				\
+	fpu:INIT_FPU, 				\
+	cp0_badvaddr:0,				\
+	cp0_baduaddr:0,				\
+	trap_no:0,				\
+	pg_dir:(unsigned long) swapper_pg_dir, 	\
+	mflags:MF_FIXADE, current_ds:{0}, 0,}
+#else
 #define INIT_TSS  { \
         /* \
          * saved main processor registers \
@@ -165,6 +188,7 @@ struct thread_struct {
 	 */ \
 	MF_FIXADE, { 0 }, 0, 0 \
 }
+#endif
 
 #ifdef __KERNEL__
 
@@ -174,6 +198,7 @@ struct thread_struct {
 
 /* Free all resources held by a thread. */
 extern void release_thread(struct task_struct *);
+extern pid_t kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 
 /* Copy and release all segment info associated with a VM */
 #define copy_segments(nr, p, mm) do { } while(0)
@@ -183,16 +208,8 @@ extern void release_thread(struct task_struct *);
 /*
  * Return saved PC of a blocked thread.
  */
-extern inline unsigned long thread_saved_pc(struct thread_struct *t)
-{
-	extern void ret_from_sys_call(void);
-
-	/* New born processes are a special case */
-	if (t->reg31 == (unsigned long) ret_from_sys_call)
-		return t->reg31;
-
-	return ((unsigned long*)t->reg29)[17];
-}
+extern unsigned long thread_saved_pc(struct thread_struct *t);
+extern unsigned long mips_get_wchan(struct task_struct *p);
 
 extern int (*user_mode)(struct pt_regs *);
 

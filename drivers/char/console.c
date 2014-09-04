@@ -1034,7 +1034,7 @@ static void csi_m(int currcons)
 				toggle_meta = 0;
 				break;
 			case 11: /* ANSI X3.64-1979 (SCO-ish?)
-				  * Select first alternate font, lets
+				  * Select first alternate font, let's
 				  * chars < 32 be displayed as ROM chars.
 				  */
 				translate = set_translate(IBMPC_MAP,currcons);
@@ -1761,6 +1761,19 @@ static void do_con_trol(struct tty_struct *tty, unsigned int currcons, int c)
 	}
 }
 
+/* This is a temporary buffer used to prepare a tty console write
+ * so that we can easily avoid touching user space while holding the
+ * console spinlock.  It is allocated in con_init and is shared by
+ * this code and the vc_screen read/write tty calls.
+ *
+ * We have to allocate this statically in the kernel data section
+ * since console_init (and thus con_init) are called before any
+ * kernel memory allocation is available.
+ */
+char con_buf[PAGE_SIZE];
+#define CON_BUF_SIZE	PAGE_SIZE
+struct semaphore con_buf_sem = MUTEX;
+
 static int do_con_write(struct tty_struct * tty, int from_user,
 			const unsigned char *buf, int count)
 {
@@ -1778,6 +1791,8 @@ static int do_con_write(struct tty_struct * tty, int from_user,
 	unsigned long draw_from = 0, draw_to = 0;
 	struct vt_struct *vt = (struct vt_struct *)tty->driver_data;
 	u16 himask, charmask;
+	const unsigned char *orig_buf = NULL;
+	int orig_count;
 
 	currcons = vt->vc_num;
 	if (!vc_cons_allocated(currcons)) {
@@ -1790,11 +1805,31 @@ static int do_con_write(struct tty_struct * tty, int from_user,
 	    return 0;
 	}
 
+	orig_buf = buf;
+	orig_count = count;
+
 	if (from_user) {
-		/* just to make sure that noone lurks at places he shouldn't see. */
-		if (verify_area(VERIFY_READ, buf, count))
-			return 0; /* ?? are error codes legal here ?? */
+		down(&con_buf_sem);
+
+again:
+		if (count > CON_BUF_SIZE)
+			count = CON_BUF_SIZE;
+		if (copy_from_user(con_buf, buf, count)) {
+			n = 0; /* ?? are error codes legal here ?? */
+			goto out;
+		}
+
+		buf = con_buf;
 	}
+
+	/* At this point 'buf' is guarenteed to be a kernel buffer
+	 * and therefore no access to userspace (and therefore sleeping)
+	 * will be needed.  The con_buf_sem serializes all tty based
+	 * console rendering and vcs write/read operations.  We hold
+	 * the console spinlock during the entire write.
+	 */
+
+	disable_bh(CONSOLE_BH);
 
 	himask = hi_font_mask;
 	charmask = himask ? 0x1ff : 0xff;
@@ -1803,15 +1838,11 @@ static int do_con_write(struct tty_struct * tty, int from_user,
 	if (IS_FG)
 		hide_cursor(currcons);
 
-	disable_bh(CONSOLE_BH);
 	while (!tty->stopped && count) {
-		enable_bh(CONSOLE_BH);
-		if (from_user)
-			__get_user(c, buf);
-		else
-			c = *buf;
-		buf++; n++; count--;
-		disable_bh(CONSOLE_BH);
+		c = *buf;
+		buf++;
+		n++;
+		count--;
 
 		if (utf) {
 		    /* Combine UTF-8 into Unicode */
@@ -1917,6 +1948,24 @@ static int do_con_write(struct tty_struct * tty, int from_user,
 	}
 	FLUSH
 	enable_bh(CONSOLE_BH);
+
+out:
+	if (from_user) {
+		/* If the user requested something larger than
+		 * the CON_BUF_SIZE, and the tty is not stopped,
+		 * keep going.
+		 */
+		if ((orig_count > CON_BUF_SIZE) && !tty->stopped) {
+			orig_count -= CON_BUF_SIZE;
+			orig_buf += CON_BUF_SIZE;
+			count = orig_count;
+			buf = orig_buf;
+			goto again;
+		}
+
+		up(&con_buf_sem);
+	}
+
 	return n;
 #undef FLUSH
 }
@@ -2336,7 +2385,7 @@ __initfunc(unsigned long con_init(unsigned long kmem_start))
 		screenbuf = (unsigned short *) kmem_start;
 		kmem_start += screenbuf_size;
 		kmalloced = 0;
-		vc_init(currcons, video_num_lines, video_num_columns, 
+		vc_init(currcons, video_num_lines, video_num_columns,
 			currcons || !sw->con_save_screen);
 		for (j=k=0; j<16; j++) {
 			vc_cons[currcons].d->vc_palette[k++] = default_red[j] ;
@@ -2344,6 +2393,7 @@ __initfunc(unsigned long con_init(unsigned long kmem_start))
 			vc_cons[currcons].d->vc_palette[k++] = default_blu[j] ;
 		}
 	}
+
 	currcons = fg_console = 0;
 	master_display_fg = vc_cons[currcons].d;
 	set_origin(currcons);

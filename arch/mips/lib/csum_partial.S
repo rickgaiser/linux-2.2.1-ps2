@@ -1,4 +1,4 @@
-/* $Id: csum_partial.S,v 1.3 1998/05/07 14:17:45 ralf Exp $
+/* $Id: csum_partial.S,v 1.2 1998/05/07 23:44:01 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -230,10 +230,22 @@ small_memcpy:
 	 move	a1, t2
 
 end_bytes:
+#ifdef CONFIG_CPU_R5900 	/* inhibit short loop */
+	lb	t0, (src)
+	subu	a1, a1, 0x1
+	beqz	a2, out
+	 addu	src, src, 0x1
+
 	lb	t0, (src)
 	subu	a1, a1, 0x1
 	bnez	a2, end_bytes
 	 addu	src, src, 0x1
+#else
+	lb	t0, (src)
+	subu	a1, a1, 0x1
+	bnez	a2, end_bytes
+	 addu	src, src, 0x1
+#endif
 
 out:
 	jr	ra

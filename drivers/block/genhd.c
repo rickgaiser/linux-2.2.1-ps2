@@ -18,6 +18,10 @@
  *  Check partition table on IDE disks for common CHS translations
  *
  *  Added needed MAJORS for new pairs, {hdi,hdj}, {hdk,hdl}
+ *
+ *
+ *  Added LVM extensions - Heinz Mauelshagen 03/07/1999
+ *
  */
 
 #include <linux/config.h>
@@ -28,6 +32,7 @@
 #include <linux/string.h>
 #include <linux/blk.h>
 #include <linux/init.h>
+#include <linux/malloc.h>
 
 #include <asm/system.h>
 
@@ -65,6 +70,11 @@ extern int net_dev_init(void);
 extern void note_bootable_part(kdev_t dev, int part);
 #endif
 
+#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
+#include <linux/lvm.h>
+void ( *lvm_hd_name_ptr) ( char *, int) = NULL;
+#endif
+
 /*
  * disk_name() is used by genhd.c and md.c.
  * It formats the devicename of the indicated disk
@@ -83,6 +93,16 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 	 * This requires special handling here.
 	 */
 	switch (hd->major) {
+#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
+               /*
+                * LVM specific handling
+                */
+               case LVM_BLOCK_MAJOR:
+                       *buf = 0;
+                       if ( lvm_hd_name_ptr != NULL)
+                               ( lvm_hd_name_ptr) ( buf, minor);
+                       return buf;
+#endif
 		case IDE5_MAJOR:
 			unit += 2;
 		case IDE4_MAJOR:
@@ -663,12 +683,16 @@ static int osf_partition(struct gendisk *hd, unsigned int dev, unsigned long fir
 	label = (struct disklabel *) (bh->b_data+64);
 	partition = label->d_partitions;
 	if (label->d_magic != DISKLABELMAGIC) {
+#ifndef CONFIG_DECSTATION
 		printk("magic: %08x\n", label->d_magic);
+#endif
 		brelse(bh);
 		return 0;
 	}
 	if (label->d_magic2 != DISKLABELMAGIC) {
+#ifndef CONFIG_DECSTATION
 		printk("magic2: %08x\n", label->d_magic2);
+#endif
 		brelse(bh);
 		return 0;
 	}
@@ -762,11 +786,12 @@ static int sun_partition(struct gendisk *hd, kdev_t dev, unsigned long first_sec
 #endif /* CONFIG_SUN_PARTITION */
 
 #ifdef CONFIG_SGI_PARTITION
+#include <asm/byteorder.h>
 
 static int sgi_partition(struct gendisk *hd, kdev_t dev, unsigned long first_sector)
 {
-	int i, csum;
-	unsigned int *ui;
+	int i, csum, magic;
+	unsigned int *ui, start, blocks, cs;
 	struct buffer_head *bh;
 	struct sgi_disklabel {
 		int magic_mushroom;         /* Big fat spliff... */
@@ -796,15 +821,18 @@ static int sgi_partition(struct gendisk *hd, kdev_t dev, unsigned long first_sec
 	}
 	label = (struct sgi_disklabel *) bh->b_data;
 	p = &label->partitions[0];
-	if(label->magic_mushroom != SGI_LABEL_MAGIC) {
+	magic = label->magic_mushroom;
+	if(be32_to_cpu(magic) != SGI_LABEL_MAGIC) {
 		printk("Dev %s SGI disklabel: bad magic %08x\n",
-		       kdevname(dev), label->magic_mushroom);
+		       kdevname(dev), magic);
 		brelse(bh);
 		return 0;
 	}
 	ui = ((unsigned int *) (label + 1)) - 1;
-	for(csum = 0; ui >= ((unsigned int *) label);)
-		csum += *ui--;
+	for(csum = 0; ui >= ((unsigned int *) label);) {
+		cs = *ui--;
+		csum += be32_to_cpu(cs);
+	}
 	if(csum) {
 		printk("Dev %s SGI disklabel: csum bad, label corrupted\n",
 		       kdevname(dev));
@@ -817,9 +845,11 @@ static int sgi_partition(struct gendisk *hd, kdev_t dev, unsigned long first_sec
 	 * current_minor.
 	 */
 	for(i = 0; i < 16; i++, p++) {
-		if(!(p->num_blocks))
+		blocks = be32_to_cpu(p->num_blocks);
+                start  = be32_to_cpu(p->first_block);
+		if(!blocks)
 			continue;
-		add_partition(hd, current_minor, p->first_block, p->num_blocks);
+		add_partition(hd, current_minor, start, blocks);
 		current_minor++;
 	}
 	printk("\n");
@@ -1176,6 +1206,55 @@ static int atari_partition (struct gendisk *hd, kdev_t dev,
 }
 #endif /* CONFIG_ATARI_PARTITION */
 
+#ifdef CONFIG_ULTRIX_PARTITION
+
+static int ultrix_partition(struct gendisk *hd, kdev_t dev, unsigned long first_sector)
+{
+	int i, minor = current_minor;
+	struct buffer_head *bh;
+	struct ultrix_disklabel {
+		long	pt_magic;	/* magic no. indicating part. info exits */
+		int	pt_valid;	/* set by driver if pt is current */
+		struct  pt_info {
+			int		pi_nblocks; /* no. of sectors */
+			unsigned long	pi_blkoff;  /* block offset for start */
+		} pt_part[8];
+	} *label;
+
+#define PT_MAGIC	0x032957	/* Partition magic number */
+#define PT_VALID	1		/* Indicates if struct is valid */
+
+#define	SBLOCK	((unsigned long)((16384 - sizeof(struct ultrix_disklabel)) \
+                  /get_ptable_blocksize(dev)))
+
+	bh = bread (dev, SBLOCK, get_ptable_blocksize(dev));
+	if (!bh) {
+		printk (" unable to read block 0x%lx\n", SBLOCK);
+		return -1;
+	}
+	
+	label = (struct ultrix_disklabel *)(bh->b_data
+                                            + get_ptable_blocksize(dev)
+                                            - sizeof(struct ultrix_disklabel));
+
+	if (label->pt_magic == PT_MAGIC && label->pt_valid == PT_VALID) {
+		for (i=0; i<8; i++, minor++)
+			if (label->pt_part[i].pi_nblocks)
+				add_partition(hd, minor, 
+					      label->pt_part[i].pi_blkoff,
+					      label->pt_part[i].pi_nblocks);
+		brelse(bh);
+		printk ("\n");
+		return 1;
+	} else {
+		brelse(bh);
+		return 0;
+	}
+}
+
+#endif /* CONFIG_ULTRIX_PARTITION */
+
+
 static void check_partition(struct gendisk *hd, kdev_t dev)
 {
 	static int first_time = 1;
@@ -1225,6 +1304,10 @@ static void check_partition(struct gendisk *hd, kdev_t dev)
 	if(sgi_partition(hd, dev, first_sector))
 		return;
 #endif
+#ifdef CONFIG_ULTRIX_PARTITION
+	if(ultrix_partition(hd, dev, first_sector))
+		return;
+#endif
 	printk(" unknown partition table\n");
 }
 
@@ -1264,9 +1347,15 @@ static inline void setup_dev(struct gendisk *dev)
 	int end_minor	= dev->max_nr * dev->max_p;
 
 	blk_size[dev->major] = NULL;
+	blk_dev[dev->major].gd = dev;
 	for (i = 0 ; i < end_minor; i++) {
 		dev->part[i].start_sect = 0;
 		dev->part[i].nr_sects = 0;
+
+		dev->part[i].nr_segs = 1;
+		dev->part[i].seg = NULL;
+		dev->part[i].hash_unit = 0;
+		dev->part[i].hash = NULL;
 	}
 	dev->init(dev);	
 	for (drive = 0 ; drive < dev->nr_real ; drive++) {

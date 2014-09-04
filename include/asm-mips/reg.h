@@ -7,14 +7,15 @@
  * for more details.
  *
  * Copyright (C) 1995 by Ralf Baechle
+ * Copyright (C) 2000,2001  Sony Computer Entertainment Inc.
+ * Copyright 2001 Sony Corporation
  */
 #ifndef __ASM_MIPS_REG_H
 #define __ASM_MIPS_REG_H
+#include <linux/autoconf.h>
 
 /*
- * This defines/structures correspond to the register layout on stack -
- * if the order here is changed, it needs to be updated in
- * include/asm-mips/stackframe.h
+ * Thease values are used for dumping core, not for context switch.
  */
 #define EF_REG0			6
 #define EF_REG1			7
@@ -63,6 +64,14 @@
 #define EF_CP0_STATUS		44
 #define EF_CP0_CAUSE		45
 
-#define EF_SIZE			180
+#define EF_SIZE			(45*4)
+
+#ifdef CONFIG_CONTEXT_R5900
+#define EF_LO1			46
+#define EF_HI1			47
+#define EF_SA			48
+#undef  EF_SIZE
+#define EF_SIZE			(48*16)
+#endif
 
 #endif /* __ASM_MIPS_REG_H */

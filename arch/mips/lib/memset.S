@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1998 by Ralf Baechle
  *
- * $Id: memset.S,v 1.2 1998/04/25 17:01:45 ralf Exp $
+ * $Id: memset.S,v 1.1 1998/05/04 09:12:54 ralf Exp $
  */
 #include <asm/asm.h>
 #include <asm/offset.h>
@@ -110,10 +110,18 @@ small_memset:
 	beqz	a2, 2f
 	 addu	t1, a0, a2
 
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+1:	addiu	a0, 1				/* fill bytewise */
+	beq	t1, a0, 2f
+	 sb	a1, -1(a0)
+	addiu	a0, 1				/* fill bytewise */
+	bne	t1, a0, 1b
+	 sb	a1, -1(a0)
+#else
 1:	addiu	a0, 1				/* fill bytewise */
 	bne	t1, a0, 1b
 	 sb	a1, -1(a0)
-
+#endif
 2:	jr	ra				/* done */
 	 move	a2, zero
 	END(memset)

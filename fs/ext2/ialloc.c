@@ -200,7 +200,7 @@ void ext2_free_inode (struct inode * inode)
 	}
 	if (inode->i_nlink) {
 		printk ("ext2_free_inode: inode has nlink=%d\n",
-			inode->i_nlink);
+			(int) inode->i_nlink);
 		return;
 	}
 	if (!sb) {

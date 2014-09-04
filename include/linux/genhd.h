@@ -55,10 +55,23 @@ struct partition {
 	unsigned int nr_sects;		/* nr of sectors in partition */
 } __attribute__((packed));
 
+struct hd_seg_struct {
+	long start_sect;
+	long nr_sects;
+	long offset;
+};
+
 struct hd_struct {
 	long start_sect;
 	long nr_sects;
+
+	int nr_segs;
+	struct hd_seg_struct *seg;
+	long hash_unit;
+	struct hd_seg_struct **hash;
+        int version;
 };
+
 
 struct gendisk {
 	int major;			/* major number of driver */

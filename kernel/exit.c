@@ -22,7 +22,7 @@ extern struct task_struct *child_reaper;
 
 int getrusage(struct task_struct *, int, struct rusage *);
 
-static void release(struct task_struct * p)
+void release(struct task_struct * p)
 {
 	if (p != current) {
 #ifdef __SMP__

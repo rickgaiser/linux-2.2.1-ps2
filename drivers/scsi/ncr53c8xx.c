@@ -131,6 +131,11 @@
 #include <linux/time.h>
 #include <linux/timer.h>
 #include <linux/stat.h>
+#ifdef __mips__
+#include <asm/bootinfo.h>
+#include <asm/pgtable.h>
+#include <asm/sni.h>
+#endif /* __mips__ */
 
 #include <linux/version.h>
 #include <linux/blk.h>
@@ -485,7 +490,7 @@ typedef	int		vm_size_t;
 #ifndef bzero
 #define bzero(d, n)	memset((d), 0, (n))
 #endif
- 
+
 #ifndef offsetof
 #define offsetof(t, m)	((size_t) (&((t *)0)->m))
 #endif
@@ -554,6 +559,8 @@ static spinlock_t driver_lock;
 **	the script processor. Because some architectures use 
 **	different physical addresses from the PCI BUS, we must 
 **	use virt_to_bus instead of virt_to_phys.
+**
+** FIXME: Bus addresses are _not_ physical addresses.
 */
 
 #define vtophys(p)	virt_to_bus(p)
@@ -658,7 +665,7 @@ static void *m_alloc(int size, int a_shift)
 	a_size	= ALIGN_SIZE(a_shift);
 	a_mask	= ALIGN_MASK(a_shift);
 
-	ptr = (void *) kmalloc(size + a_size, GFP_ATOMIC);
+	ptr = (void *) kmalloc(size + a_size, GFP_UNCACHED | GFP_ATOMIC);
 	if (ptr) {
 		addr	= (((u_long) ptr) + a_size) & a_mask;
 		*((void **) (addr - sizeof(void *))) = ptr;
@@ -782,7 +789,7 @@ static void ncr53c8xx_intr(int irq, void *dev_id, struct pt_regs * regs);
 static void ncr53c8xx_timeout(unsigned long np);
 
 #define initverbose (driver_setup.verbose)
-#define bootverbose (np->verbose)
+#define bootverbose (driver_setup.verbose)
 
 #ifdef SCSI_NCR_NVRAM_SUPPORT
 /*
@@ -3754,6 +3761,7 @@ void ncr_script_fill (struct script * scr, struct scripth * scrh)
 	};
 
 	assert ((u_long)p == (u_long)&scr->data_out + sizeof (scr->data_out));
+flush_cache_all();
 }
 
 /*==========================================================
@@ -3905,6 +3913,7 @@ static void ncr_script_copy_and_bind (ncb_p np, ncrcmd *src, ncrcmd *dst, int le
 			*dst++ = cpu_to_scr(*src++);
 
 	};
+flush_cache_all();
 }
 
 /*==========================================================
@@ -4546,7 +4555,7 @@ printk(KERN_INFO "ncr53c%s-%d: rev=0x%02x, base=0x%lx, io_port=0x%lx, irq=%d\n",
 	**	can be used safely.
 	*/
 
-	np->reg = (struct ncr_reg*) np->vaddr;
+	np->reg = virt_to_bus((struct ncr_reg*) np->vaddr);
 
 #endif /* !defined NCR_IOMAPPED */
 
@@ -5193,12 +5202,14 @@ int ncr_queue_command (ncb_p np, Scsi_Cmnd *cmd)
 	*/
 	cp->phys.smsg.addr		= cpu_to_scr(CCB_PHYS (cp, scsi_smsg));
 	cp->phys.smsg.size		= cpu_to_scr(msglen);
+flush_cache_all();
 
 	/*
 	**	command
 	*/
 	cp->phys.cmd.addr		= cpu_to_scr(vtophys (&cmd->cmnd[0]));
 	cp->phys.cmd.size		= cpu_to_scr(cmd->cmd_len);
+	dma_cache_wback_inv((unsigned long)cmd->cmnd, cmd->cmd_len);
 
 	/*
 	**	status
@@ -5232,6 +5243,9 @@ int ncr_queue_command (ncb_p np, Scsi_Cmnd *cmd)
 	else
 		cp->tlimit	= jiffies + 86400 * HZ;/* No timeout=24 hours */
 	cp->magic		= CCB_MAGIC;
+//printk("cp == %08lx\n", cp);
+	dma_cache_wback_inv((unsigned long)cp, sizeof(*cp));
+flush_cache_all();
 
 	/*
 	**	insert next CCBs into start queue.
@@ -5303,6 +5317,7 @@ static void ncr_put_start_queue(ncb_p np, ccb_p cp)
 
 	if (DEBUG_FLAGS & DEBUG_QUEUE)
 		printk ("%s: queuepos=%d.\n", ncr_name (np), np->squeueput);
+	dma_cache_wback_inv((unsigned long)np, sizeof(*np));
 
 	/*
 	**	Script processor may be waiting for reselect.
@@ -6216,9 +6231,11 @@ void ncr_init (ncb_p np, int reset, char * msg, u_long code)
 
 		if (tp->usrwide > np->maxwide)
 			tp->usrwide = np->maxwide;
+		dma_cache_wback_inv((unsigned long) tp, sizeof(*tp));
 
 		ncr_negotiate (np, tp);
 	}
+	dma_cache_wback_inv((unsigned long) np, sizeof(*np));
 
 	/*
 	**    Start script processor.
@@ -6612,6 +6629,7 @@ static void ncr_setup_tags (ncb_p np, u_char tn, u_char ln)
 	lp->jump_tag.l_paddr = lp->usetags?
 			cpu_to_scr(NCB_SCRIPT_PHYS(np, resel_tag)) :
 			cpu_to_scr(NCB_SCRIPT_PHYS(np, resel_notag));
+flush_cache_all();
 
 	/*
 	**	Announce change to user.
@@ -6909,6 +6927,7 @@ void ncr_exception (ncb_p np)
 	u_char	istat, dstat;
 	u_short	sist;
 	int	i;
+flush_cache_all();
 
 	/*
 	**	interrupt on the fly ?
@@ -7065,6 +7084,7 @@ void ncr_exception (ncb_p np)
 	if (sist & UDC) {
 		printk ("%s: unexpected disconnect\n", ncr_name(np));
 		OUTB (HS_PRT, HS_UNEXPECTED);
+//flush_cache_all();	// ???
 		OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, cleanup));
 		return;
 	};
@@ -7117,6 +7137,7 @@ void ncr_int_sto (ncb_p np)
 	**	repair start queue and jump to start point.
 	*/
 
+flush_cache_all();
 	OUTL (nc_dsp, NCB_SCRIPTH_PHYS (np, sto_restart));
 	return;
 }
@@ -7646,6 +7667,8 @@ static void ncr_sir_to_redo(ncb_p np, int num, ccb_p cp)
 		cp->sensecmd[0]		= 0x03;
 		cp->sensecmd[1]		= cmd->lun << 5;
 		cp->sensecmd[4]		= sizeof(cmd->sense_buffer);
+		dma_cache_wback_inv((unsigned long)cmd->sense_buffer,
+		                    sizeof(cmd->sense_buffer));
 
 		/*
 		**	sense data
@@ -7654,6 +7677,8 @@ static void ncr_sir_to_redo(ncb_p np, int num, ccb_p cp)
 				cpu_to_scr(vtophys (&cmd->sense_buffer[0]));
 		cp->phys.sense.size	=
 				cpu_to_scr(sizeof(cmd->sense_buffer));
+		dma_cache_wback_inv((unsigned long)cmd->sense_buffer,
+		                    sizeof(cmd->sense_buffer));
 
 		/*
 		**	requeue the command.
@@ -7687,6 +7712,8 @@ static void ncr_sir_to_redo(ncb_p np, int num, ccb_p cp)
 	}
 
 out:
+flush_cache_all();	// ???
+//dma_cache_wback_inv((unsigned long)cmd->cmnd, cmd->cmd_len);
 	OUTONB (nc_dcntl, (STD|NOCOM));
 	return;
 }
@@ -7777,6 +7804,7 @@ void ncr_int_sir (ncb_p np)
 	}
 
 	switch (num) {
+flush_cache_all(); 	// ???
 /*-----------------------------------------------------------------------------
 **
 **	Was Sie schon immer ueber transfermode negotiation wissen wollten ...
@@ -7882,6 +7910,7 @@ void ncr_int_sir (ncb_p np)
 		np->msgin [0] = M_NOOP;
 		np->msgout[0] = M_NOOP;
 		cp->nego_status = 0;
+flush_cache_all();
 		OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, dispatch));
 		return;
 /*		break;	*/
@@ -7964,12 +7993,14 @@ void ncr_int_sir (ncb_p np)
 					**	Answer wasn't acceptable.
 					*/
 					ncr_setsync (np, cp, 0, 0xe0);
+flush_cache_all();
 					OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, msg_bad));
 				} else {
 					/*
 					**	Answer is ok.
 					*/
 					ncr_setsync (np, cp, scntl3, (fak<<5)|ofs);
+flush_cache_all();
 					OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, clrack));
 				};
 				return;
@@ -8003,6 +8034,7 @@ void ncr_int_sir (ncb_p np)
 		}
 
 		if (!ofs) {
+flush_cache_all();
 			OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, msg_bad));
 			return;
 		}
@@ -8061,12 +8093,14 @@ void ncr_int_sir (ncb_p np)
 					**	Answer wasn't acceptable.
 					*/
 					ncr_setwide (np, cp, 0, 1);
+flush_cache_all();
 					OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, msg_bad));
 				} else {
 					/*
 					**	Answer is ok.
 					*/
 					ncr_setwide (np, cp, wide, 1);
+flush_cache_all();
 					OUTL (nc_dsp, NCB_SCRIPT_PHYS (np, clrack));
 				};
 				return;
@@ -8445,6 +8479,7 @@ static void ncr_alloc_ccb(ncb_p np, u_char tn, u_char ln)
 
 	xpt_insque_head(&cp->link_ccbq, &lp->free_ccbq);
 	ncr_setup_tags (np, tn, ln);
+flush_cache_all();
 }
 
 /*==========================================================
@@ -8758,10 +8793,16 @@ static	int	ncr_scatter(ccb_p cp, Scsi_Cmnd *cmd)
 
 	if (!use_sg) {
 		if (cmd->request_bufflen) {
+			unsigned long addr, len;
+
+			addr = cmd->request_buffer;
+			len = cmd->request_bufflen;
 			data = &data[MAX_SCATTER - 1];
-			data[0].addr = cpu_to_scr(vtophys(cmd->request_buffer));
-			data[0].size = cpu_to_scr(cmd->request_bufflen);
-			cp->data_len = cmd->request_bufflen;
+			data[0].addr = cpu_to_scr(vtophys(addr));
+			data[0].size = cpu_to_scr(len);
+			if (addr)
+				dma_cache_wback_inv(addr, len);
+			cp->data_len = len;
 			segment = 1;
 		}
 	}
@@ -8770,11 +8811,14 @@ static	int	ncr_scatter(ccb_p cp, Scsi_Cmnd *cmd)
 
 		data = &data[MAX_SCATTER - use_sg];
 		while (segment < use_sg) {
-			data[segment].addr =
-				cpu_to_scr(vtophys(scatter[segment].address));
-			data[segment].size =
-				cpu_to_scr(scatter[segment].length);
-			cp->data_len	   += scatter[segment].length;
+			unsigned long addr, len;
+
+			addr = scatter[segment].address;
+			len = scatter[segment].length;
+			data[segment].addr = cpu_to_scr(vtophys(addr));
+			data[segment].size = cpu_to_scr(len);
+			dma_cache_wback_inv(addr, len);
+			cp->data_len += len;
 			++segment;
 		}
 	}
@@ -8782,6 +8826,7 @@ static	int	ncr_scatter(ccb_p cp, Scsi_Cmnd *cmd)
 		return -1;
 	}
 
+	dma_cache_wback_inv(data, sizeof(*data) * segment);
 	return segment;
 }
 
@@ -8845,6 +8890,7 @@ static int ncr_snooptest (struct ncb* np)
 	**	Set memory and register.
 	*/
 	np->ncr_cache = cpu_to_scr(host_wr);
+	dma_cache_wback_inv((unsigned long)np, sizeof(*np));
 	OUTL (nc_temp, ncr_wr);
 	/*
 	**	Start script (exchange values)
@@ -10184,9 +10230,11 @@ printk("ncr53c8xx : command successfully queued\n");
 **   passing the internal host descriptor as 'dev_id'.
 **   Otherwise, we scan the host list and call the interrupt 
 **   routine for each host that uses this IRQ.
+**
+**   Exported for certain MIPS machines with a dedicated NCR interrupt.
 */
 
-static void ncr53c8xx_intr(int irq, void *dev_id, struct pt_regs * regs)
+void ncr53c8xx_intr(int irq, void *dev_id, struct pt_regs * regs)
 {
      unsigned long flags;
      ncb_p np = (ncb_p) dev_id;
@@ -10432,6 +10480,7 @@ static void process_waiting_list(ncb_p np, int sts)
 	printk("%s: cmd %lx done forced sts=%d\n", ncr_name(np), (u_long) wcmd, sts);
 #endif
 			wcmd->result = ScsiResult(sts, 0);
+//flush_cache_all();
 			ncr_queue_done_cmd(np, wcmd);
 		}
 	}

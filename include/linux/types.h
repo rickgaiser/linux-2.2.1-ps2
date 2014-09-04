@@ -98,11 +98,13 @@ typedef		__s64		int64_t;
  * any application/library that wants linux/types.h.
  */
 
+#ifndef _USTATBITS_H
 struct ustat {
 	__kernel_daddr_t	f_tfree;
 	__kernel_ino_t		f_tinode;
 	char			f_fname[6];
 	char			f_fpack[6];
 };
+#endif /* _USTATBITS_H */
 
 #endif /* _LINUX_TYPES_H */

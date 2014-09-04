@@ -409,9 +409,7 @@ extern struct proc_dir_entry proc_scsi_esp;
 		this_id:        7,				\
 		sg_tablesize:   SG_ALL,				\
 		cmd_per_lun:    1,				\
-		use_clustering: DISABLE_CLUSTERING,		\
-		use_new_eh_code: 0				\
-}
+		use_clustering: DISABLE_CLUSTERING, }
 
 /* For our interrupt engine. */
 #define for_each_esp(esp) \

@@ -613,7 +613,12 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 	ip->tot_len = htons(len);
 	ip->check = 0;
 
-	memmove(icp + hdrlen, cp, len - hdrlen);
+	/*
+	 * if size(= len - hdrlen) is zero, memmove() goes to infinite loop.
+	 * so, size check is added.
+	 */
+	if (len - hdrlen > 0)
+		memmove(icp + hdrlen, cp, len - hdrlen);
 
 	cp = icp;
 	memcpy(cp, ip, 20);

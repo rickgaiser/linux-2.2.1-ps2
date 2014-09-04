@@ -15,9 +15,9 @@
 # along with this program; see the file COPYING.  If not, write to
 # the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
 #
-# $Source: /homes/cvs/ftape-stacked/ftape/Makefile,v $
-# $Revision: 1.4 $
-# $Date: 1997/10/05 19:17:56 $
+# $Source: /export/home/shin/ftp-gw.sony.co.jp/cvs/linux/drivers/char/ftape/Makefile,v $
+# $Revision: 1.3 $
+# $Date: 1998/08/25 09:17:00 $
 #
 #      Makefile for the QIC-40/80/3010/3020 floppy-tape driver for
 #      Linux.

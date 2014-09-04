@@ -156,6 +156,12 @@ static struct proc_dir_entry proc_pid_maps = {
 	0, &proc_arraylong_inode_operations,
 	NULL, proc_pid_fill_inode,
 };
+static struct proc_dir_entry proc_pid_statmaps = {
+	PROC_PID_STATMAPS, 8, "statmaps",
+	S_IFIFO | S_IRUGO, 1, 0, 0,
+	0, &proc_arraylong_inode_operations,
+	NULL, proc_pid_fill_inode,
+};
 
 #if CONFIG_AP1000
 static struct proc_dir_entry proc_pid_ringbuf = {
@@ -191,6 +197,7 @@ __initfunc(void proc_base_init(void))
 	proc_register(&proc_pid, &proc_pid_stat);
 	proc_register(&proc_pid, &proc_pid_statm);
 	proc_register(&proc_pid, &proc_pid_maps);
+	proc_register(&proc_pid, &proc_pid_statmaps);
 #ifdef __SMP__	
 	proc_register(&proc_pid, &proc_pid_cpu);
 #endif	

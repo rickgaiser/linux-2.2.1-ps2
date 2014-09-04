@@ -1,4 +1,4 @@
-/* $Id: traps.c,v 1.20 1998/10/14 20:26:26 ralf Exp $
+/* $Id: traps.c,v 1.19 1999/05/01 22:40:38 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -7,6 +7,7 @@
  * Copyright 1994, 1995, 1996, 1997, 1998 by Ralf Baechle
  * Modified for R3000 by Paul M. Antoine, 1995, 1996
  * Complete output from die() by Ulf Carlsson, 1998
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  */
 #include <linux/config.h>
 #include <linux/init.h>
@@ -14,6 +15,9 @@
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
+#ifdef CONFIG_KSYMTAB_MODULE
+#include <linux/ksymtab.h>
+#endif
 
 #include <asm/branch.h>
 #include <asm/cachectl.h>
@@ -60,6 +64,19 @@ extern asmlinkage void handle_fpe(void);
 extern asmlinkage void handle_watch(void);
 extern asmlinkage void handle_reserved(void);
 
+#ifdef CONFIG_CPU_R5900
+extern void ps2_be_board_handler(struct pt_regs *);
+#endif
+
+asmlinkage void (*lazy_fpu_switch)(struct task_struct *p);
+extern asmlinkage void r4xx0_lazy_fpu_switch(struct task_struct *p);
+extern asmlinkage void r2300_lazy_fpu_switch(struct task_struct *p);
+asmlinkage void (*init_fpu)(void);
+extern asmlinkage void r4xx0_init_fpu(void);
+extern asmlinkage void r2300_init_fpu(void);
+asmlinkage void (*save_fp) (struct task_struct * p);
+extern void traceback_me(void);
+
 static char *cpu_names[] = CPU_NAMES;
 
 char watch_available = 0;
@@ -70,6 +87,48 @@ void (*ibe_board_handler)(struct pt_regs *regs);
 void (*dbe_board_handler)(struct pt_regs *regs);
 
 int kstack_depth_to_print = 24;
+
+#define SYMBOL_STRLEN 100
+#ifdef CONFIG_KSYMTAB_MODULE
+
+#define __STRLEN_MARGIN 20 /* 20: max of "+0x%lx" */
+#define __STRLEN_SYMBOL 60
+
+/* print symbol and return 0 if success */
+int sprint_symbol(char *str, int sz, unsigned long addr)
+{
+	char name[__STRLEN_SYMBOL];
+	unsigned long offset;
+	extern struct ksymtab_methods ksymtab_methods;
+
+	if (sz < (__STRLEN_SYMBOL+__STRLEN_MARGIN)) 
+		return -2;
+				
+	offset = (*ksymtab_methods.find_symbol)(
+				addr, name, __STRLEN_SYMBOL, 0);
+	if ( (offset == addr) && !*str )
+		/* ksymtab module is not available */
+		return -1;
+	else if ( offset && (offset != addr) )
+		sprintf(str, "%s+0x%lx", name, offset);
+	else
+		/* Unknow symbol or no offset */
+		sprintf(str, "%s", name);
+	return 0;
+}
+#undef __STRLEN_MARGIN
+#undef __STRLEN_SYMBOL
+
+#else
+int sprint_symbol(char *str, int sz, unsigned long addr __attribute__((unused)))
+{
+	if (sz < (__STRLEN_SYMBOL+__STRLEN_MARGIN)) 
+		return -2;
+				
+	*str = '\0';
+	return -1;
+}
+#endif
 
 /*
  * These constant is for searching for possible module text segments.
@@ -112,12 +171,18 @@ void show_stack(unsigned int *sp)
 
 void show_trace(unsigned int *sp)
 {
+#ifdef DEBUG
+	char symbol_name[SYMBOL_STRLEN];
 	int i;
 	unsigned int *stack;
 	unsigned long kernel_start, kernel_end;
 	unsigned long module_start, module_end;
 	extern char _stext, _etext;
+#endif
 
+	printk("\nCall Trace:\n");
+	traceback_me();
+#ifdef DEBUG
 	stack = sp;
 	i = 0;
 
@@ -148,13 +213,19 @@ void show_trace(unsigned int *sp)
 		if ((addr >= kernel_start && addr < kernel_end) ||
 		    (addr >= module_start && addr < module_end)) { 
 
-			printk(" [<%08lx>]", addr);
+			if (sprint_symbol(symbol_name,
+					sizeof(symbol_name)-1 ,addr)<0){
+				printk(" [<%08lx>]", addr);
+			} else {
+				printk(" [<%08lx>:%s]\n", addr, symbol_name);
+			}
 			if (++i > 40) {
 				printk(" ...");
 				break;
 			}
 		}
 	}
+#endif /* DEBUG */
 }
 
 void show_code(unsigned int *pc)
@@ -175,6 +246,8 @@ void show_code(unsigned int *pc)
 
 void die(const char * str, struct pt_regs * regs, unsigned long err)
 {
+	char symbol_name[SYMBOL_STRLEN];
+
 	if (user_mode(regs))	/* Just return if in user mode.  */
 		return;
 
@@ -183,8 +256,28 @@ void die(const char * str, struct pt_regs * regs, unsigned long err)
 	show_regs(regs);
 	printk("Process %s (pid: %ld, stackpage=%08lx)\n",
 		current->comm, current->pid, (unsigned long) current);
-	show_stack((unsigned int *) regs->regs[29]);
-	show_trace((unsigned int *) regs->regs[29]);
+	show_stack((unsigned int *) get_gpreg(regs, 29));
+#ifdef CONFIG_KSYMTAB_MODULE
+	printk("\n");
+	printk("\n");
+	printk("EPC:");
+	if (sprint_symbol(symbol_name, sizeof(symbol_name)-1,
+			(unsigned long)regs->cp0_epc) < 0 ) {
+		printk(" %08lx", (unsigned long)regs->cp0_epc);
+	} else {
+		printk(" %08lx:%s\n", 
+			(unsigned long)regs->cp0_epc, symbol_name);
+	}
+	printk("RA :");
+	if (sprint_symbol(symbol_name, sizeof(symbol_name)-1,
+			get_gpreg(regs, 31)) < 0) {
+		printk(" %08lx", get_gpreg(regs, 31));
+	} else {
+		printk(" %08lx:%s\n", 
+			get_gpreg(regs, 31), symbol_name);
+	}
+#endif
+	show_trace((unsigned int *) get_gpreg(regs, 29));
 	show_code((unsigned int *) regs->cp0_epc);
 	printk("\n");
 	do_exit(SIGSEGV);
@@ -202,17 +295,16 @@ static void default_be_board_handler(struct pt_regs *regs)
 	 * Assume it would be too dangerous to continue ...
 	 */
 	force_sig(SIGBUS, current);
+show_regs(regs); while(1);
 }
 
 void do_ibe(struct pt_regs *regs)
 {
-show_regs(regs); while(1);
 	ibe_board_handler(regs);
 }
 
 void do_dbe(struct pt_regs *regs)
 {
-show_regs(regs); while(1);
 	dbe_board_handler(regs);
 }
 
@@ -325,7 +417,7 @@ void do_bp(struct pt_regs *regs)
 	/*
 	 * (A short test says that IRIX 5.3 sends SIGTRAP for all break
 	 * insns, even for break codes that indicate arithmetic failures.
-	 * Wiered ...)
+	 * Weird ...)
 	 */
 	force_sig(SIGTRAP, current);
 }
@@ -350,7 +442,8 @@ void do_ri(struct pt_regs *regs)
 {
 	lock_kernel();
 	printk("[%s:%ld] Illegal instruction at %08lx ra=%08lx\n",
-	       current->comm, current->pid, regs->cp0_epc, regs->regs[31]);
+	       current->comm, current->pid, regs->cp0_epc, 
+	       get_gpreg(regs, 31));
 	unlock_kernel();
 	if (compute_return_epc(regs))
 		return;
@@ -370,10 +463,25 @@ void do_cpu(struct pt_regs *regs)
 		return;
 
 	if (current->used_math) {		/* Using the FPU again.  */
-		r4xx0_lazy_fpu_switch(last_task_used_math);
+		lazy_fpu_switch(last_task_used_math);
 	} else {				/* First time FPU user.  */
+		if (last_task_used_math)  {
+			struct pt_regs *last_regs;
 
-		r4xx0_init_fpu();
+			/* Save LAST_TASK_USED_MATH fpu context */
+			set_cp0_status(ST0_CU1, ST0_CU1);
+			save_fp(last_task_used_math);
+			set_cp0_status(ST0_CU1, 0);
+
+			/* Make LAST_TASK_USED_MATH lose fpu */
+			last_regs = (struct pt_regs *) 
+				((unsigned long) last_task_used_math +
+				KERNEL_STACK_SIZE - 32 
+				- sizeof(struct pt_regs));
+			last_regs->cp0_status &= ~ST0_CU1;
+
+		}
+		init_fpu();
 		current->used_math = 1;
 	}
 	last_task_used_math = current;
@@ -431,8 +539,9 @@ static inline void setup_dedicated_int(void)
 	extern void except_vec4(void);
 	switch(mips_cputype) {
 	case CPU_NEVADA:
-		memcpy((void *)(KSEG0 + 0x200), except_vec4, 8);
 		set_cp0_cause(CAUSEF_IV, CAUSEF_IV);
+	case CPU_R5900:
+		memcpy((void *)(KSEG0 + 0x200), except_vec4, 8);
 		dedicated_iv_available = 1;
 	}
 }
@@ -468,6 +577,10 @@ extern asmlinkage void r6000_restore_fp_context(struct sigcontext *sc);
 extern asmlinkage void r4xx0_resume(void *tsk);
 extern asmlinkage void r2300_resume(void *tsk);
 
+asmlinkage void (*save_fp)(struct task_struct * p);
+extern asmlinkage void r4xx0_save_fp(struct task_struct * p);
+extern asmlinkage void r2300_save_fp(struct task_struct * p);
+
 __initfunc(void trap_init(void))
 {
 	extern char except_vec0_nevada, except_vec0_r4000;
@@ -482,8 +595,10 @@ __initfunc(void trap_init(void))
 
 	/* Copy the generic exception handler code to it's final destination. */
 	memcpy((void *)(KSEG0 + 0x80), &except_vec1_generic, 0x80);
+#if !defined(CONFIG_CPU_R5900)
 	memcpy((void *)(KSEG0 + 0x100), &except_vec2_generic, 0x80);
 	memcpy((void *)(KSEG0 + 0x180), &except_vec3_generic, 0x80);
+#endif
 
 	/*
 	 * Setup default vectors
@@ -502,6 +617,7 @@ __initfunc(void trap_init(void))
 	 * Handling the following exceptions depends mostly of the cpu type
 	 */
 	switch(mips_cputype) {
+#if !defined(CONFIG_CPU_R5900)
 	case CPU_R10000:
 		/*
 		 * The R10000 is in most aspects similar to the R4400.  It
@@ -550,6 +666,9 @@ __initfunc(void trap_init(void))
 		save_fp_context = r4k_save_fp_context;
 		restore_fp_context = r4k_restore_fp_context;
 		resume = r4xx0_resume;
+		save_fp = r4xx0_save_fp;
+		lazy_fpu_switch = r4xx0_lazy_fpu_switch;
+		init_fpu = r4xx0_init_fpu;
 		set_except_vector(1, r4k_handle_mod);
 		set_except_vector(2, r4k_handle_tlbl);
 		set_except_vector(3, r4k_handle_tlbs);
@@ -573,6 +692,52 @@ __initfunc(void trap_init(void))
 		set_except_vector(15, handle_fpe);
 		break;
 
+#endif
+	case CPU_R5900:
+		/* 0x000: V_TLB_REFILL vector  */
+		memcpy((void *)KSEG0, &except_vec0_r4000, 0x80);
+		/* 0x080: V_COUNTER vector */
+		{ 
+		extern char except_vec2_r5900_counter;
+		memcpy((void *)(KSEG0 + 0x80), &except_vec2_r5900_counter, 0x80);
+		}
+		/* 0x100: V_DEBUG vector */
+		memcpy((void *)(KSEG0 + 0x100), (void *) KSEG0, 0x80);
+		/* 0x180: V_COMMON vector  (EXL != 1) */
+		memcpy((void *)(KSEG0 + 0x180), &except_vec3_generic, 0x80);
+
+		save_fp_context = r2300_save_fp_context;
+		restore_fp_context = r2300_restore_fp_context;
+		resume = r2300_resume;
+		save_fp = r2300_save_fp;
+		lazy_fpu_switch = r2300_lazy_fpu_switch;
+		init_fpu = r2300_init_fpu;
+		set_except_vector(1, r4k_handle_mod);
+		set_except_vector(2, r4k_handle_tlbl);
+		set_except_vector(3, r4k_handle_tlbs);
+		set_except_vector(4, handle_adel);
+		set_except_vector(5, handle_ades);
+
+		/*
+		 * The following two are signaled by onboard hardware and
+		 * should get board specific handlers to get maximum
+		 * available information.
+		 */
+		set_except_vector(6, handle_ibe);
+		set_except_vector(7, handle_dbe);
+		ibe_board_handler = ps2_be_board_handler;
+		dbe_board_handler = ps2_be_board_handler;
+
+		set_except_vector(8, handle_sys);
+		set_except_vector(9, handle_bp);
+		set_except_vector(10, handle_ri);
+		set_except_vector(11, handle_cpu);
+		set_except_vector(12, handle_ov);
+		set_except_vector(13, handle_tr);
+		set_except_vector(15, handle_fpe);
+		break;
+
+#if !defined(CONFIG_CPU_R5900)
 	case CPU_R6000:
 	case CPU_R6000A:
 		save_fp_context = r6000_save_fp_context;
@@ -596,6 +761,9 @@ __initfunc(void trap_init(void))
 		save_fp_context = r2300_save_fp_context;
 		restore_fp_context = r2300_restore_fp_context;
 		resume = r2300_resume;
+		save_fp = r2300_save_fp;
+		lazy_fpu_switch = r2300_lazy_fpu_switch;
+		init_fpu = r2300_init_fpu;
 		set_except_vector(1, r2300_handle_mod);
 		set_except_vector(2, r2300_handle_tlbl);
 		set_except_vector(3, r2300_handle_tlbs);
@@ -630,6 +798,7 @@ __initfunc(void trap_init(void))
 		panic("Can't handle CPU");
 		break;
 
+#endif
 	case CPU_UNKNOWN:
 	default:
 		panic("Unknown CPU type");

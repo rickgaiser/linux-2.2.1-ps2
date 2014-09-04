@@ -115,7 +115,12 @@ IDE_OBJS += ide-pci.o
 endif
 
 ifeq ($(CONFIG_BLK_DEV_IDEDMA),y)
-IDE_OBJS += ide-dma.o
+  ifeq ($(CONFIG_PS2),y)
+    IDE_OBJS += ps2dma.o
+    LX_OBJS += ide-features.o
+  else
+    IDE_OBJS += ide-dma.o
+  endif
 endif
 
 ifeq ($(CONFIG_BLK_DEV_DTC2278),y)
@@ -228,6 +233,14 @@ else
   ifeq ($(CONFIG_BLK_DEV_XD),m)
   M_OBJS += xd.o
   endif
+endif
+
+ifeq ($(CONFIG_BLK_DEV_LVM),y)
+L_OBJS += lvm.o
+else
+   ifeq ($(CONFIG_BLK_DEV_LVM),m)
+   M_OBJS += lvm.o
+   endif
 endif
 
 ifeq ($(CONFIG_BLK_DEV_MD),y)

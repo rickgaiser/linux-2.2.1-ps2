@@ -1,4 +1,4 @@
-/* $Id: cpu.h,v 1.2 1998/05/01 01:35:49 ralf Exp $
+/* $Id: cpu.h,v 1.1.1.1 1997/06/01 03:17:12 ralf Exp $
  * cpu.h: Values of the PRId register used to match up
  *        various MIPS cpu types.
  *
@@ -29,6 +29,7 @@
 #define PRID_IMP_MAGIC    0x2500
 #define PRID_IMP_RM7000   0x2700
 #define PRID_IMP_NEVADA   0x2800		/* RM5260 ??? */
+#define PRID_IMP_R5900    0x2e00
 
 #define PRID_IMP_UNKNOWN  0xff00
 

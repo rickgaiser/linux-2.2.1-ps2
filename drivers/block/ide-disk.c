@@ -88,44 +88,43 @@ static inline void idedisk_output_data (ide_drive_t *drive, void *buffer, unsign
  */
 static int lba_capacity_is_ok (struct hd_driveid *id)
 {
-	unsigned long lba_sects   = id->lba_capacity;
-	unsigned long chs_sects   = id->cyls * id->heads * id->sectors;
-	unsigned long _10_percent = chs_sects / 10;
+	unsigned long lba_sects, chs_sects, head, tail;
+#ifdef DEBUG
+        printk("lba_capacity_is_ok\n");/* mokuno */
+        printk("ID:lba_cap=%d, cyls=%d, heads=%d, sectors=%d\n",
+               id->lba_capacity, id->cyls, id->heads, id->sectors);
+#endif
 
 	/*
-	 * very large drives (8GB+) may lie about the number of cylinders
-	 * This is a split test for drives 8 Gig and Bigger only.
+	 * The ATA spec tells large drives to return
+	 * C/H/S = 16383/16/63 independent of their size.
+	 * Some drives can be jumpered to use 15 heads instead of 16.
 	 */
-	if ((id->lba_capacity >= 16514064) && (id->cyls == 0x3fff) &&
-	    (id->heads == 16) && (id->sectors == 63)) {
-		id->cyls = lba_sects / (16 * 63); /* correct cyls */
-		return 1;	/* lba_capacity is our only option */
-	}
-	/*
-	 * This is a split test for drives less than 8 Gig only.
-	 * Drives less than 8GB sometimes declare that they have 15 heads.
-	 * This is an accounting trick (0-15) == (1-16), just an initial
-	 * zero point difference.
-	 */
-	if ((id->lba_capacity < 16514064) && (lba_sects > chs_sects) &&
-	    ((id->heads == 15) || (id->heads == 16)) && (id->sectors == 63)) {
-		if (id->heads == 15)
-			id->cyls = lba_sects / (15 * 63); /* correct cyls */
-		if (id->heads == 16)
-			id->cyls = lba_sects / (16 * 63); /* correct cyls */
-		return 1;	/* lba_capacity is our only option */
-	}
+	if (id->cyls == 16383 && id->sectors == 63 &&
+	    (id->heads == 15 || id->heads == 16) &&
+	    id->lba_capacity >= 16383*63*id->heads){
+		return 1;
+        }
+
+	lba_sects   = id->lba_capacity;
+	chs_sects   = id->cyls * id->heads * id->sectors;
+
 	/* perform a rough sanity check on lba_sects:  within 10% is "okay" */
-	if ((lba_sects - chs_sects) < _10_percent) {
-		return 1;	/* lba_capacity is good */
-	}
+	if ((lba_sects - chs_sects) < chs_sects/10){
+		return 1;
+        }
+
 	/* some drives have the word order reversed */
-	lba_sects = (lba_sects << 16) | (lba_sects >> 16);
-	if ((lba_sects - chs_sects) < _10_percent) {
-		id->lba_capacity = lba_sects;	/* fix it */
+	head = ((lba_sects >> 16) & 0xffff);
+	tail = (lba_sects & 0xffff);
+	lba_sects = (head | (tail << 16));
+	if ((lba_sects - chs_sects) < chs_sects/10) {
+		id->lba_capacity = lba_sects;
 		return 1;	/* lba_capacity is (now) good */
 	}
-	return 0;	/* lba_capacity value is bad */
+
+	return 0;	/* lba_capacity value may be bad */
+
 }
 
 /*
@@ -453,14 +452,18 @@ static int idedisk_media_change (ide_drive_t *drive)
  */
 static unsigned long idedisk_capacity (ide_drive_t  *drive)
 {
+
 	struct hd_driveid *id = drive->id;
 	unsigned long capacity = drive->cyl * drive->head * drive->sect;
+#ifdef DEBUG
+        printk("idedisk_capacity(%s): caps =%d ", drive->name,capacity); /* MOKUNO DEBUG */
+        printk("drive.cyl=%d, drive.head=%d, drive.sect=%d\n",drive->cyl, drive->head, drive->sect);
+#endif
 
 	drive->select.b.lba = 0;
 	/* Determine capacity, and use LBA if the drive properly supports it */
 	if (id != NULL && (id->capability & 2) && lba_capacity_is_ok(id)) {
 		if (id->lba_capacity >= capacity) {
-			drive->cyl = id->lba_capacity / (drive->head * drive->sect);
 			capacity = id->lba_capacity;
 			drive->select.b.lba = 1;
 		}
@@ -694,6 +697,12 @@ static void idedisk_setup (ide_drive_t *drive)
 
 	/* Extract geometry if we did not already have one for the drive */
 	if (!drive->cyl || !drive->head || !drive->sect) {
+#ifdef DEBUG
+                printk("idedisk_setup(%s): drive->cyl,bios_cyl(%d,%d,%d) set by id->cyls(%d,%d,%d)\n",
+                       drive->name,
+                       drive->cyl,drive->head,drive->sect,
+                       id->cyls,id->heads,id->sectors);/* mokuno */
+#endif
 		drive->cyl     = drive->bios_cyl  = id->cyls;
 		drive->head    = drive->bios_head = id->heads;
 		drive->sect    = drive->bios_sect = id->sectors;
@@ -711,6 +720,12 @@ static void idedisk_setup (ide_drive_t *drive)
 		 * An exception to this is the cylinder count,
 		 * which we reexamine later on to correct for 1024 limitations.
 		 */
+#ifdef DEBUG
+                printk("idedisk_setup(%s): drive->cyl(%d,%d,%d) set by id->cur_cyls(%d,%d,%d)\n",
+                       drive->name,
+                       drive->cyl,drive->head,drive->sect,
+                       id->cur_cyls,id->cur_heads,id->cur_sectors);/* mokuno */
+#endif
 		drive->cyl  = id->cur_cyls;
 		drive->head = id->cur_heads;
 		drive->sect = id->cur_sectors;
@@ -720,6 +735,7 @@ static void idedisk_setup (ide_drive_t *drive)
 		check = (id->cur_capacity0 << 16) | id->cur_capacity1;
 		if (check == capacity) {	/* was it swapped? */
 			/* yes, bring it into little-endian order: */
+                  printk("idedisk_setup: wordswapped id->cur_capacity\n");
 			id->cur_capacity0 = (capacity >>  0) & 0xffff;
 			id->cur_capacity1 = (capacity >> 16) & 0xffff;
 		}
@@ -730,6 +746,7 @@ static void idedisk_setup (ide_drive_t *drive)
 		if ((id->lba_capacity > 16514064) || (id->cyls == 0x3fff)) {
 			id->cyls = ((int)(id->lba_capacity/(id->heads * id->sectors)));
 		}
+                printk("idedisk_setup(%s): drive->cyl setup again\n", drive->name);
 		drive->cyl  = id->cur_cyls    = id->cyls;
 		drive->head = id->cur_heads   = id->heads;
 		drive->sect = id->cur_sectors = id->sectors;
@@ -742,22 +759,23 @@ static void idedisk_setup (ide_drive_t *drive)
 	 * if possible, give fdisk access to more of the drive,
 	 * by correcting bios_cyls:
 	 */
-	if ((capacity >= (drive->bios_cyl * drive->bios_sect * drive->bios_head)) &&
-	    (!drive->forced_geom) && drive->bios_sect && drive->bios_head) {
-		drive->bios_cyl = (capacity / drive->bios_sect) / drive->bios_head;
-#ifdef DEBUG
-		printk("Fixing Geometry :: CHS=%d/%d/%d to CHS=%d/%d/%d\n",
-			drive->id->cur_cyls,
-			drive->id->cur_heads,
-			drive->id->cur_sectors,
-			drive->bios_cyl,
-			drive->bios_head,
-			drive->bios_sect);
-#endif
-		drive->id->cur_cyls    = drive->bios_cyl;
-		drive->id->cur_heads   = drive->bios_head;
-		drive->id->cur_sectors = drive->bios_sect;
+
+        /* large disk bug fix */
+	if (!drive->forced_geom &&
+	    capacity > drive->bios_cyl * drive->bios_sect * drive->bios_head) {
+		unsigned long cylsize;
+		cylsize = drive->bios_sect * drive->bios_head;
+		if (cylsize == 0 || capacity/cylsize > 65535) {
+                        drive->bios_sect = 63;
+			drive->bios_head = 255;
+			cylsize = 63*255;
+		}
+		if (capacity/cylsize > 65535)
+			drive->bios_cyl = 65535;
+		else
+			drive->bios_cyl  = capacity/cylsize;
 	}
+
 
 #if 0	/* done instead for entire identify block in arch/ide.h stuff */
 	/* fix byte-ordering of buffer size field */
@@ -779,19 +797,6 @@ static void idedisk_setup (ide_drive_t *drive)
 		}
 	}
 	printk("\n");
-
-	if (drive->select.b.lba) {
-		if (*(int *)&id->cur_capacity0 < id->lba_capacity) {
-#ifdef DEBUG
-			printk("     CurSects=%d, LBASects=%d, ",
-				*(int *)&id->cur_capacity0, id->lba_capacity);
-#endif
-			*(int *)&id->cur_capacity0 = id->lba_capacity;
-#ifdef DEBUG
-			printk( "Fixed CurSects=%d\n", *(int *)&id->cur_capacity0);
-#endif
-		}
-	}
 
 	drive->mult_count = 0;
 	if (id->max_multsect) {

@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1996, 1998 by Ralf Baechle
  *
- * $Id: unaligned.c,v 1.5 1998/08/17 13:57:44 ralf Exp $
+ * $Id: unaligned.c,v 1.5 1999/05/01 22:40:39 ralf Exp $
  *
  * This file contains exception handler for address error exception with the
  * special capability to execute faulting instructions in software.  The
@@ -17,7 +17,7 @@
  * Putting data to unaligned addresses is a bad practice even on Intel where
  * only the performance is affected.  Much worse is that such code is non-
  * portable.  Due to several programs that die on MIPS due to alignment
- * problems I decieded to implement this handler anyway though I originally
+ * problems I decided to implement this handler anyway though I originally
  * didn't intend to do this at all for user code.
  *
  * For now I enable fixing of address errors by default to make life easier.
@@ -73,6 +73,7 @@
  *       A store crossing a page boundary might be executed only partially.
  *       Undo the partial store in this case.
  */
+#include <linux/autoconf.h>
 #include <linux/mm.h>
 #include <linux/signal.h>
 #include <linux/smp.h>
@@ -98,12 +99,18 @@
 static inline void
 emulate_load_store_insn(struct pt_regs *regs,
                         unsigned long addr,
-                        unsigned long pc)
+                        unsigned long pc,
+                        unsigned long epc)
 {
+	/* Let compiler know "fault" labeled part to be compiled. */
+	__label__ fault, sigbus, sigill;
+	static void *labels[] = { &&fault, &&sigbus, &&sigill };
+	enum { label_fault=0, label_sigbus, label_sigill };
+
 	union mips_instruction insn;
 	unsigned long value, fixup;
 
-	regs->regs[0] = 0;
+	set_gpreg(regs, 0, 0);
 	/*
 	 * This load never faults.
 	 */
@@ -137,10 +144,10 @@ emulate_load_store_insn(struct pt_regs *regs,
 	case lb_op:
 	case lbu_op:
 	case sb_op:
-		goto sigbus;
+		goto *labels[label_sigbus];
 
 	/*
-	 * The remaining opcodes are the ones that are really of interrest.
+	 * The remaining opcodes are the ones that are really of interest.
 	 */
 	case lh_op:
 		check_axs(pc, addr, 2);
@@ -164,7 +171,7 @@ emulate_load_store_insn(struct pt_regs *regs,
 			:"=&r" (value)
 			:"r" (addr), "i" (&&fault)
 			:"$1");
-		regs->regs[insn.i_format.rt] = value;
+		set_gpreg(regs, insn.i_format.rt, value);
 		return;
 
 	case lw_op:
@@ -184,7 +191,7 @@ emulate_load_store_insn(struct pt_regs *regs,
 			".previous"
 			:"=&r" (value)
 			:"r" (addr), "i" (&&fault));
-			regs->regs[insn.i_format.rt] = value;
+			set_gpreg(regs, insn.i_format.rt, value);
 			return;
 
 	case lhu_op:
@@ -209,7 +216,7 @@ emulate_load_store_insn(struct pt_regs *regs,
 			:"=&r" (value)
 			:"r" (addr), "i" (&&fault)
 			:"$1");
-		regs->regs[insn.i_format.rt] = value;
+		set_gpreg(regs, insn.i_format.rt, value);
 		return;
 
 	case lwu_op:
@@ -230,10 +237,27 @@ emulate_load_store_insn(struct pt_regs *regs,
 			:"=&r" (value)
 			:"r" (addr), "i" (&&fault));
 		value &= 0xffffffff;
-		regs->regs[insn.i_format.rt] = value;
+		set_gpreg(regs, insn.i_format.rt, value);
 		return;
 
 	case ld_op:
+#ifdef CONFIG_CONTEXT_R5900
+		check_axs(pc, addr, 8);
+		__asm__(
+			".set\tmips3\n"
+			"1:\tldl\t$8,7(%1)\n"
+			"2:\tldr\t$8,(%1)\n\t"
+			"\tsd	$8, %0\n\t"
+			".set\tmips0\n\t"
+			".section\t__ex_table,\"a\"\n\t"
+			STR(PTR)"\t1b,%2\n\t"
+			STR(PTR)"\t2b,%2\n\t"
+			".previous"
+			:"=m" (regs->regs[insn.i_format.rt])
+			:"r" (addr), "i" (&&fault)
+			: "$8" );
+		return;
+#else /* CONFIG_CONTEXT_R5900 */
 		check_axs(pc, addr, 8);
 		__asm__(
 			".set\tmips3\n"
@@ -252,13 +276,14 @@ emulate_load_store_insn(struct pt_regs *regs,
 			".previous"
 			:"=&r" (value)
 			:"r" (addr), "i" (&&fault));
-		regs->regs[insn.i_format.rt] = value;
+		set_gpreg(regs, insn.i_format.rt, value);
 		return;
+#endif /* CONFIG_CONTEXT_R5900 */
 
 	case sh_op:
 		check_axs(pc, addr, 2);
-		value = regs->regs[insn.i_format.rt];
-		__asm__(
+		value = get_gpreg(regs, insn.i_format.rt);
+		__asm__ __volatile__ (
 #ifdef __BIG_ENDIAN
 			".set\tnoat\n"
 			"1:\tsb\t%0,1(%1)\n\t"
@@ -284,8 +309,8 @@ emulate_load_store_insn(struct pt_regs *regs,
 
 	case sw_op:
 		check_axs(pc, addr, 4);
-		value = regs->regs[insn.i_format.rt];
-		__asm__(
+		value = get_gpreg(regs, insn.i_format.rt);
+		__asm__ __volatile__ (
 #ifdef __BIG_ENDIAN
 			"1:\tswl\t%0,(%1)\n"
 			"2:\tswr\t%0,3(%1)\n\t"
@@ -303,9 +328,27 @@ emulate_load_store_insn(struct pt_regs *regs,
 		return;
 
 	case sd_op:
+#ifdef CONFIG_CONTEXT_R5900
 		check_axs(pc, addr, 8);
-		value = regs->regs[insn.i_format.rt];
-		__asm__(
+		__asm__ __volatile__ (
+			".set\tmips3\n"
+			"\tld\t$8,%0\n\t"
+			"1:\tsdl\t$8,7(%1)\n\t"
+			"2:\tsdr\t$8,(%1)\n\t"
+			".set\tmips0\n\t"
+			".section\t__ex_table,\"a\"\n\t"
+			STR(PTR)"\t1b,%2\n\t"
+			STR(PTR)"\t2b,%2\n\t"
+			".previous"
+			: /* no outputs */
+			:"m" (regs->regs[insn.i_format.rt]), 
+				"r" (addr), "i" (&&fault)
+			: "$8" );
+		return;
+#else /* CONFIG_CONTEXT_R5900 */
+		check_axs(pc, addr, 8);
+		value = get_gpreg(regs, insn.i_format.rt);
+		__asm__ __volatile__ (
 			".set\tmips3\n"
 #ifdef __BIG_ENDIAN
 			"1:\tsdl\t%0,(%1)\n"
@@ -323,6 +366,7 @@ emulate_load_store_insn(struct pt_regs *regs,
 			: /* no outputs */
 			:"r" (value), "r" (addr), "i" (&&fault));
 		return;
+#endif /* CONFIG_CONTEXT_R5900 */
 
 	case lwc1_op:
 	case ldc1_op:
@@ -331,12 +375,16 @@ emulate_load_store_insn(struct pt_regs *regs,
 		/*
 		 * I herewith declare: this does not happen.  So send SIGBUS.
 		 */
-		goto sigbus;
+		goto *labels[label_sigbus];
 
 	case lwc2_op:
 	case ldc2_op:
 	case swc2_op:
 	case sdc2_op:
+#ifdef	CONFIG_PS2
+		/* COP2: Emotion Engine VPU0 */
+		goto *labels[label_sigbus];
+#else
 		/*
 		 * These are the coprocessor 2 load/stores.  The current
 		 * implementations don't use cp2 and cp2 should always be
@@ -344,37 +392,42 @@ emulate_load_store_insn(struct pt_regs *regs,
                  * (No longer true: The Sony Praystation uses cp2 for
                  * 3D matrix operations.  Dunno if that thingy has a MMU ...)
 		 */
+#endif
+
 	default:
 		/*
 		 * Pheeee...  We encountered an yet unknown instruction or
 		 * cache coherence problem.  Die sucker, die ...
 		 */
-		goto sigill;
+		goto *labels[label_sigill];
 	}
 	return;
 
 fault:
 	/* Did we have an exception handler installed? */
-	fixup = search_exception_table(regs->cp0_epc);
+	fixup = search_exception_table(epc);
 	if (fixup) {
 		long new_epc;
-		new_epc = fixup_exception(dpf_reg, fixup, regs->cp0_epc);
+		new_epc = fixup_exception(dpf_reg, fixup, epc);
 		printk(KERN_DEBUG "%s: Forwarding exception at [<%lx>] (%lx)\n",
-		       current->comm, regs->cp0_epc, new_epc);
+		       current->comm, epc, new_epc);
 		regs->cp0_epc = new_epc;
 		return;
 	}
 
+	regs->cp0_epc = epc;	/* restore real epc */
 	lock_kernel();
 	send_sig(SIGSEGV, current, 1);
 	unlock_kernel();
 	return;
 sigbus:
+	regs->cp0_epc = epc;	/* restore real epc */
 	lock_kernel();
 	send_sig(SIGBUS, current, 1);
 	unlock_kernel();
 	return;
 sigill:
+	regs->cp0_epc = epc;	/* restore real epc */
 	lock_kernel();
 	send_sig(SIGILL, current, 1);
 	unlock_kernel();
@@ -385,28 +438,30 @@ unsigned long unaligned_instructions;
 
 asmlinkage void do_ade(struct pt_regs *regs)
 {
-	unsigned long pc;
+	unsigned long pc, epc;
 
 	/*
 	 * Did we catch a fault trying to load an instruction?
 	 * This also catches attempts to activate MIPS16 code on
 	 * CPUs which don't support it.
 	 */
+	epc = regs->cp0_epc;
 	if (regs->cp0_badvaddr == regs->cp0_epc)
 		goto sigbus;
 
-	pc = regs->cp0_epc + ((regs->cp0_cause & CAUSEF_BD) ? 4 : 0);
+	pc = epc + ((regs->cp0_cause & CAUSEF_BD) ? 4 : 0);
 	if (compute_return_epc(regs))
 		return;
 	if ((current->tss.mflags & MF_FIXADE) == 0)
 		goto sigbus;
 
-	emulate_load_store_insn(regs, regs->cp0_badvaddr, pc);
+	emulate_load_store_insn(regs, regs->cp0_badvaddr, pc, epc);
 	unaligned_instructions++;
 
 	return;
 
 sigbus:
+	regs->cp0_epc = epc;	/* restore real epc */
 	lock_kernel();
 	force_sig(SIGBUS, current);
 	unlock_kernel();

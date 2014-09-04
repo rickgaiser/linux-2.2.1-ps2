@@ -1,4 +1,4 @@
-/* $Id: r4k_switch.S,v 1.4 1998/07/14 09:15:33 ralf Exp $
+/* $Id: r4k_switch.S,v 1.6 1999/05/01 22:40:37 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -41,8 +41,14 @@
 	CPU_RESTORE_NONSCRATCH($28)
 	addiu	t0, $28, KERNEL_STACK_SIZE-32
 	sw	t0, kernelsp
-	lw	a3, TASK_MM($28)
+	mfc0	t1, CP0_STATUS		/* Do we really need this? */
+	li	a3, 0xff00
+	and	t1, a3
 	lw	a2, THREAD_STATUS($28)
+	nor	a3, $0, a3
+	and	a2, a3
+	lw	a3, TASK_MM($28)
+	or	a2, t1
 	lw	a3, MM_CONTEXT(a3)
 	mtc0	a2, CP0_STATUS
 	andi	a3, a3, 0xff
@@ -65,6 +71,9 @@ LEAF(r4xx0_lazy_fpu_switch)
 
 	beqz	a0, 2f				# Save floating point state
 	 nor	t3, zero, t3
+
+	cfc1	$0, $31				# sync fpu, before loses
+
 	lw	t1, ST_OFF(a0)			# last thread looses fpu
 	and	t1, t3
 	sw	t1, ST_OFF(a0)
@@ -91,6 +100,7 @@ LEAF(r4xx0_lazy_fpu_switch)
  */
 	.set	noreorder
 LEAF(r4xx0_save_fp)
+	cfc1	$0, $31				# sync fpu, first
 	mfc0	t0, CP0_STATUS
 	sll	t1, t0, 5
 	bgez	t1, 1f				# 16 register mode?
@@ -104,8 +114,8 @@ LEAF(r4xx0_save_fp)
 
 /*
  * Load the FPU with signalling NANS.  This bit pattern we're using has
- * the property that no matter wether considered as single or as double
- * precission represents signaling NANS.
+ * the property that no matter whether considered as single or as double
+ * precision represents signaling NANS.
  *
  * We initialize fcr31 to rounding to nearest, no exceptions.
  */

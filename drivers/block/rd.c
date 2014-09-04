@@ -71,7 +71,11 @@ extern void wait_for_keypress(void);
 #include <linux/blk.h>
 
 /* The RAM disk size is now a parameter */
+#ifdef CONFIG_PS2
+#define NUM_RAMDISKS 1		/* This cannot be overridden (yet) */ 
+#else
 #define NUM_RAMDISKS 16		/* This cannot be overridden (yet) */ 
+#endif
 
 #ifndef MODULE
 /* We don't have to load RAM disks or gunzip them in a module. */
@@ -98,7 +102,11 @@ static int rd_blocksizes[NUM_RAMDISKS];
  * architecture-specific setup routine (from the stored boot sector
  * information). 
  */
+#ifdef CONFIG_PS2
+int rd_size = 10240;		/* Size of the RAM disks */
+#else
 int rd_size = 4096;		/* Size of the RAM disks */
+#endif
 
 #ifndef MODULE
 int rd_doload = 0;		/* 1 = load RAM disk, 0 = don't load */

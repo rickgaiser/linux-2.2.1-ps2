@@ -11,6 +11,7 @@
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
+#include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/sysrq.h>
 #include <linux/interrupt.h>
@@ -24,6 +25,8 @@ extern void unblank_console(void);
 extern int C_A_D;
 
 int panic_timeout = 0;
+
+struct notifier_block *panic_notifier_list = NULL;
 
 void __init panic_setup(char *str, int *ints)
 {
@@ -47,10 +50,16 @@ NORET_TYPE void panic(const char * fmt, ...)
 	else
 		sys_sync();
 
-	unblank_console();
-
 #ifdef __SMP__
 	smp_send_stop();
+#endif
+
+	unblank_console();
+
+	notifier_call_chain(&panic_notifier_list, 0, NULL);
+
+#ifdef __mips__
+	traceback_me();
 #endif
 	if (panic_timeout > 0)
 	{
@@ -77,5 +86,7 @@ NORET_TYPE void panic(const char * fmt, ...)
 	sti();
 	for(;;) {
 		CHECK_EMERGENCY_SYNC
+		unblank_console();
 	}
 }
+

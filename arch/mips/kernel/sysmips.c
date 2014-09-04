@@ -7,7 +7,7 @@
  *
  * Copyright (C) 1995, 1996, 1997 by Ralf Baechle
  *
- * $Id: sysmips.c,v 1.4 1998/05/07 15:20:05 ralf Exp $
+ * $Id: sysmips.c,v 1.6 1998/08/25 09:14:42 ralf Exp $
  */
 #include <linux/errno.h>
 #include <linux/linkage.h>
@@ -22,6 +22,9 @@
 #include <asm/pgtable.h>
 #include <asm/sysmips.h>
 #include <asm/uaccess.h>
+#ifdef CONFIG_CPU_R5900
+#include <asm/sys_r5900.h>
+#endif
 
 /*
  * How long a hostname can we get from user space?
@@ -78,17 +81,56 @@ sys_sysmips(int cmd, int arg1, int arg2, int arg3)
 		goto out;
 
 	case MIPS_ATOMIC_SET:
-		/* This is broken in case of page faults and SMP ...
-		   Risc/OS fauls after maximum 20 tries with EAGAIN.  */
+	/* This is page-faults safe */
+	{ 
+		static volatile int lock = 0;
+		static struct wait_queue *wq = NULL;
+
+		struct wait_queue wait = { current, NULL };
+		int retry = 0;
+
 		p = (int *) arg1;
-		retval = verify_area(VERIFY_WRITE, p, sizeof(*p));
-		if (retval)
+		current->state = TASK_INTERRUPTIBLE;
+		add_wait_queue(&wq, &wait);
+		while (lock) {
+			if (retry > 20) break;
+			retry ++;
+
+			if (signal_pending(current)) {
+				remove_wait_queue(&wq, &wait);
+				current->state = TASK_RUNNING;
+				retval =   -EINTR;
+				goto out;
+			}
+			schedule();
+			current->state = TASK_INTERRUPTIBLE;
+		}
+		remove_wait_queue (&wq, &wait);
+		current->state = TASK_RUNNING;
+
+		if (lock) {
+			retval = -EAGAIN;
 			goto out;
-		save_and_cli(flags);
-		retval = *p;
-		*p = arg2;
-		restore_flags(flags);
+		}
+		lock ++;
+
+		retval = verify_area(VERIFY_WRITE, p, sizeof(*p));
+		if (retval) {
+			goto out_atomic_set;
+		}
+
+		/* swap *p and arg2, this cause possibly page faults */
+		if (__get_user(retval, p)) {
+			retval = -EFAULT;
+			goto out_atomic_set;
+		}
+		__put_user(arg2, p);
+
+	out_atomic_set:
+		lock --;
+		wake_up_interruptible(&wq);
 		goto out;
+	}
 
 	case MIPS_FIXADE:
 		tmp = current->tss.mflags & ~3;
@@ -104,7 +146,11 @@ sys_sysmips(int cmd, int arg1, int arg2, int arg3)
 	case MIPS_RDNVRAM:
 		retval = -EIO;
 		goto out;
-
+#ifdef CONFIG_CPU_R5900
+	case MIPS_SYS_R5900:
+		retval = mips_sys_r5900(arg1, arg2, arg3);
+		goto out;
+#endif
 	default:
 		retval = -EINVAL;
 		goto out;
@@ -123,3 +169,4 @@ sys_cachectl(char *addr, int nbytes, int op)
 {
 	return -ENOSYS;
 }
+

@@ -11,7 +11,7 @@
  *
  * Copyright (C) 1996, 1997 by Ralf Baechle
  *
- * $Id: atomic.h,v 1.4 1998/05/01 01:35:45 ralf Exp $
+ * $Id: atomic.h,v 1.5 1998/03/04 09:51:21 ralf Exp $
  */
 #ifndef __ASM_MIPS_ATOMIC_H
 #define __ASM_MIPS_ATOMIC_H
@@ -35,6 +35,13 @@ typedef struct { int counter; } atomic_t;
 #include <asm/system.h>
 
 /*
+ * Make sure gcc doesn't try to be clever and move things around
+ * on us. We need to use _exactly_ the address the user gave us,
+ * not some alias that contains the same information.
+ */
+#define __atomic_fool_gcc(x) (*(volatile struct { int a[100]; } *)x)
+
+/*
  * The MIPS I implementation is only atomic with respect to
  * interrupts.  R3000 based multiprocessor machines are rare anyway ...
  */
@@ -44,7 +51,7 @@ extern __inline__ void atomic_add(int i, volatile atomic_t * v)
 
 	save_flags(flags);
 	cli();
-	*v += i;
+	v->counter += i;
 	restore_flags(flags);
 }
 
@@ -54,7 +61,7 @@ extern __inline__ void atomic_sub(int i, volatile atomic_t * v)
 
 	save_flags(flags);
 	cli();
-	*v -= i;
+	v->counter -= i;
 	restore_flags(flags);
 }
 
@@ -64,9 +71,9 @@ extern __inline__ int atomic_add_return(int i, atomic_t * v)
 
 	save_flags(flags);
 	cli();
-	temp = *v;
+	temp = v->counter;
 	temp += i;
-	*v = temp;
+	v->counter = temp;
 	restore_flags(flags);
 
 	return temp;
@@ -78,13 +85,29 @@ extern __inline__ int atomic_sub_return(int i, atomic_t * v)
 
 	save_flags(flags);
 	cli();
-	temp = *v;
+	temp = v->counter;
 	temp -= i;
-	*v = temp;
+	v->counter = temp;
 	restore_flags(flags);
 
 	return temp;
 }
+
+extern __inline__ void atomic_clear_mask(unsigned long mask, unsigned long * v)
+{
+        unsigned long temp;
+        int     flags;
+
+        save_flags(flags);
+        cli();
+        temp = *v;
+        temp &= ~mask;
+        *v = temp;
+        restore_flags(flags);
+
+        return;
+}
+
 #endif
 
 #if (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) || \

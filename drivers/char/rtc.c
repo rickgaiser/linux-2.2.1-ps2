@@ -54,6 +54,7 @@
 #include <linux/malloc.h>
 #include <linux/ioport.h>
 #include <linux/fcntl.h>
+#include <linux/rtc.h>
 #include <linux/mc146818rtc.h>
 #include <linux/init.h>
 #include <linux/poll.h>
@@ -113,6 +114,7 @@ static unsigned long epoch = 1900;	/* year corresponding to 0x00	*/
 unsigned char days_in_mo[] = 
 {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
+#ifndef CONFIG_PS2
 /*
  *	A very tiny interrupt handler. It runs with SA_INTERRUPT set,
  *	so that there is no possibility of conflicting with the
@@ -137,6 +139,7 @@ static void rtc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	if (rtc_status & RTC_TIMER_ON)
 		mod_timer(&rtc_irq_timer, jiffies + HZ/rtc_freq + 2*HZ/100);
 }
+#endif /* !CONFIG_PS2 */
 
 /*
  *	Now all the various file operations that we export.
@@ -147,6 +150,7 @@ static long long rtc_llseek(struct file *file, loff_t offset, int origin)
 	return -ESPIPE;
 }
 
+#ifndef CONFIG_PS2
 static ssize_t rtc_read(struct file *file, char *buf,
 			size_t count, loff_t *ppos)
 {
@@ -182,6 +186,7 @@ static ssize_t rtc_read(struct file *file, char *buf,
 
 	return retval;
 }
+#endif /* !CONFIG_PS2 */
 
 static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		     unsigned long arg)
@@ -191,6 +196,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	struct rtc_time wtime; 
 
 	switch (cmd) {
+#ifndef CONFIG_PS2
 	case RTC_AIE_OFF:	/* Mask alarm int. enab. bit	*/
 	{
 		mask_rtc_irq_bit(RTC_AIE);
@@ -292,6 +298,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 		return 0;
 	}
+#endif /* !CONFIG_PS2 */
 	case RTC_RD_TIME:	/* Read the time/date from RTC	*/
 	{
 		get_rtc_time(&wtime);
@@ -304,6 +311,9 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		unsigned char save_control, save_freq_select;
 		unsigned int yrs;
 		unsigned long flags;
+#ifdef CONFIG_T10000_AIFRTC
+		unsigned int cent;
+#endif
 			
 		if (!capable(CAP_SYS_TIME))
 			return -EACCES;
@@ -333,8 +343,15 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		if ((hrs >= 24) || (min >= 60) || (sec >= 60))
 			return -EINVAL;
 
+#ifndef CONFIG_T10000_AIFRTC
 		if ((yrs -= epoch) > 255)    /* They are unsigned */
 			return -EINVAL;
+#else
+		if (yrs > 9999)
+			return -EINVAL;
+		cent = yrs / 100;
+		yrs = yrs % 100;
+#endif
 
 		save_flags(flags);
 		cli();
@@ -353,6 +370,9 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			BIN_TO_BCD(day);
 			BIN_TO_BCD(mon);
 			BIN_TO_BCD(yrs);
+#ifdef CONFIG_T10000_AIFRTC
+			BIN_TO_BCD(cent);
+#endif
 		}
 
 		save_control = CMOS_READ(RTC_CONTROL);
@@ -367,12 +387,19 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		CMOS_WRITE(min, RTC_MINUTES);
 		CMOS_WRITE(sec, RTC_SECONDS);
 
+#ifdef CONFIG_T10000_AIFRTC
+		/* select bank 1 and set century (DS17487 only) */
+		CMOS_WRITE((save_freq_select|RTC_DIV_RESET2|0x10), RTC_FREQ_SELECT);
+		CMOS_WRITE(cent, 0x48);	/* RTC_CENTURY */
+#endif
+
 		CMOS_WRITE(save_control, RTC_CONTROL);
 		CMOS_WRITE(save_freq_select, RTC_FREQ_SELECT);
 
 		restore_flags(flags);
 		return 0;
 	}
+#ifndef CONFIG_PS2
 	case RTC_IRQP_READ:	/* Read the periodic IRQ rate.	*/
 	{
 		return put_user(rtc_freq, (unsigned long *)arg);
@@ -413,7 +440,8 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		restore_flags(flags);
 		return 0;
 	}
-#ifdef __alpha__
+#endif /* !CONFIG_PS2 */
+#if defined(__alpha__) || defined(__mips__)
 	case RTC_EPOCH_READ:	/* Read the epoch.	*/
 	{
 		return put_user (epoch, (unsigned long *)arg);
@@ -457,6 +485,7 @@ static int rtc_open(struct inode *inode, struct file *file)
 
 static int rtc_release(struct inode *inode, struct file *file)
 {
+#ifndef CONFIG_PS2
 	/*
 	 * Turn off all interrupts once the device is no longer
 	 * in use, and clear the data.
@@ -479,12 +508,14 @@ static int rtc_release(struct inode *inode, struct file *file)
 		rtc_status &= ~RTC_TIMER_ON;
 		del_timer(&rtc_irq_timer);
 	}
+#endif /* !CONFIG_PS2 */
 
 	rtc_irq_data = 0;
 	rtc_status &= ~RTC_IS_OPEN;
 	return 0;
 }
 
+#ifndef CONFIG_PS2
 static unsigned int rtc_poll(struct file *file, poll_table *wait)
 {
 	poll_wait(file, &rtc_wait, wait);
@@ -492,6 +523,7 @@ static unsigned int rtc_poll(struct file *file, poll_table *wait)
 		return POLLIN | POLLRDNORM;
 	return 0;
 }
+#endif /* !CONFIG_PS2 */
 
 /*
  *	The various file operations we support.
@@ -499,10 +531,18 @@ static unsigned int rtc_poll(struct file *file, poll_table *wait)
 
 static struct file_operations rtc_fops = {
 	rtc_llseek,
+#ifndef CONFIG_PS2
 	rtc_read,
+#else
+	NULL,		/* No read */
+#endif
 	NULL,		/* No write */
 	NULL,		/* No readdir */
+#ifndef CONFIG_PS2
 	rtc_poll,
+#else
+	NULL,		/* No poll */
+#endif
 	rtc_ioctl,
 	NULL,		/* No mmap */
 	rtc_open,
@@ -520,22 +560,26 @@ static struct miscdevice rtc_dev=
 __initfunc(int rtc_init(void))
 {
 	unsigned long flags;
-#ifdef __alpha__
+#if defined(__alpha__) || defined(__mips__)
 	unsigned int year, ctrl;
 	unsigned long uip_watchdog;
 	char *guess = NULL;
 #endif
 	printk(KERN_INFO "Real Time Clock Driver v%s\n", RTC_VERSION);
+#ifndef CONFIG_PS2
 	if(request_irq(RTC_IRQ, rtc_interrupt, SA_INTERRUPT, "rtc", NULL))
 	{
 		/* Yeah right, seeing as irq 8 doesn't even hit the bus. */
 		printk(KERN_ERR "rtc: IRQ %d is not free.\n", RTC_IRQ);
 		return -EIO;
 	}
+#endif	/* !CONFIG_PS2 */
 	misc_register(&rtc_dev);
+#ifndef CONFIG_PS2
 	/* Check region? Naaah! Just snarf it up. */
 	request_region(RTC_PORT(0), RTC_IO_EXTENT, "rtc");
-#ifdef __alpha__
+#endif	/* !CONFIG_PS2 */
+#if defined(__alpha__) || defined(__mips__)
 	rtc_freq = HZ;
 	
 	/* Each operating system on an Alpha uses its own epoch.
@@ -565,6 +609,10 @@ __initfunc(int rtc_init(void))
 	if (guess)
 		printk("rtc: %s epoch (%lu) detected\n", guess, epoch);
 #endif
+#ifdef CONFIG_MIPS_JAZZ
+	epoch = 1980;
+#endif
+#ifndef CONFIG_PS2
 	init_timer(&rtc_irq_timer);
 	rtc_irq_timer.function = rtc_dropped_irq;
 	rtc_wait = NULL;
@@ -574,9 +622,11 @@ __initfunc(int rtc_init(void))
 	CMOS_WRITE(((CMOS_READ(RTC_FREQ_SELECT) & 0xF0) | 0x06), RTC_FREQ_SELECT);
 	restore_flags(flags);
 	rtc_freq = 1024;
+#endif	/* !CONFIG_PS2 */
 	return 0;
 }
 
+#ifndef CONFIG_PS2
 /*
  * 	At IRQ rates >= 4096Hz, an interrupt may get lost altogether.
  *	(usually during an IDE disk interrupt, with IRQ unmasking off)
@@ -603,6 +653,7 @@ void rtc_dropped_irq(unsigned long data)
 	rtc_irq_data |= (CMOS_READ(RTC_INTR_FLAGS) & 0xF0);	/* restart */
 	restore_flags(flags);
 }
+#endif /* !CONFIG_PS2 */
 
 /*
  *	Info exported via "/proc/rtc".
@@ -636,6 +687,7 @@ int get_rtc_status(char *buf)
 		     tm.tm_hour, tm.tm_min, tm.tm_sec,
 		     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, epoch);
 
+#ifndef CONFIG_PS2
 	get_rtc_alm_time(&tm);
 
 	/*
@@ -658,6 +710,7 @@ int get_rtc_status(char *buf)
 		p += sprintf(p, "%02d\n", tm.tm_sec);
 	else
 		p += sprintf(p, "**\n");
+#endif /* !CONFIG_PS2 */
 
 	p += sprintf(p,
 		     "DST_enable\t: %s\n"
@@ -702,6 +755,10 @@ void get_rtc_time(struct rtc_time *rtc_tm)
 
 	unsigned long flags, uip_watchdog = jiffies;
 	unsigned char ctrl;
+#ifdef CONFIG_T10000_AIFRTC
+	unsigned char save_freq_select;
+	int cent;
+#endif
 
 	/*
 	 * read RTC once any update in progress is done. The update
@@ -731,6 +788,13 @@ void get_rtc_time(struct rtc_time *rtc_tm)
 	rtc_tm->tm_mday = CMOS_READ(RTC_DAY_OF_MONTH);
 	rtc_tm->tm_mon = CMOS_READ(RTC_MONTH);
 	rtc_tm->tm_year = CMOS_READ(RTC_YEAR);
+#ifdef CONFIG_T10000_AIFRTC
+	/* select bank 1 and read century (DS17487 only) */
+	save_freq_select = CMOS_READ(RTC_FREQ_SELECT);
+	CMOS_WRITE((save_freq_select|0x10), RTC_FREQ_SELECT);
+	cent = CMOS_READ(0x48);		/* RTC_CENTURY */
+	CMOS_WRITE(save_freq_select, RTC_FREQ_SELECT);
+#endif
 	ctrl = CMOS_READ(RTC_CONTROL);
 	restore_flags(flags);
 
@@ -742,18 +806,27 @@ void get_rtc_time(struct rtc_time *rtc_tm)
 		BCD_TO_BIN(rtc_tm->tm_mday);
 		BCD_TO_BIN(rtc_tm->tm_mon);
 		BCD_TO_BIN(rtc_tm->tm_year);
+#ifdef CONFIG_T10000_AIFRTC
+		BCD_TO_BIN(cent);
+#endif
 	}
 
+#ifndef CONFIG_T10000_AIFRTC
 	/*
 	 * Account for differences between how the RTC uses the values
 	 * and how they are defined in a struct rtc_time;
 	 */
 	if ((rtc_tm->tm_year += (epoch - 1900)) <= 69)
 		rtc_tm->tm_year += 100;
+#else
+	rtc_tm->tm_year = rtc_tm->tm_year + cent * 100;
+	rtc_tm->tm_year -= 1900;
+#endif
 
 	rtc_tm->tm_mon--;
 }
 
+#ifndef CONFIG_PS2
 void get_rtc_alm_time(struct rtc_time *alm_tm)
 {
 	unsigned long flags;
@@ -818,3 +891,4 @@ void set_rtc_irq_bit(unsigned char bit)
 	rtc_irq_data = 0;
 	restore_flags(flags);
 }
+#endif /* !CONFIG_PS2 */

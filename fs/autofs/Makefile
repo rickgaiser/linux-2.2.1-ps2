@@ -25,7 +25,7 @@ CFLAGS += -D__KERNEL__ -DMODULE $(KFLAGS) -I../include -I$(KINCLUDE) $(MODFLAGS)
 all: $(O_TARGET)
 
 $(O_TARGET): $(O_OBJS)
-	$(LD) -r -o $(O_TARGET) $(O_OBJS)
+	$(LD) $(LD_RFLAG) -r -o $(O_TARGET) $(O_OBJS)
 
 install: $(O_TARGET)
 	install -c $(O_TARGET) /lib/modules/`uname -r`/fs

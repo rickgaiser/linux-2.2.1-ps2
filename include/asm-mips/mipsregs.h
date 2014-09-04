@@ -1,4 +1,4 @@
-/* $Id: mipsregs.h,v 1.6 1998/08/17 11:27:08 ralf Exp $
+/* $Id: mipsregs.h,v 1.5 1999/04/11 17:13:57 harald Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -6,11 +6,22 @@
  *
  * Copyright (C) 1994, 1995, 1996, 1997 by Ralf Baechle
  * Modified for further R[236]000 support by Paul M. Antoine, 1996.
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  */
 #ifndef __ASM_MIPS_MIPSREGS_H
 #define __ASM_MIPS_MIPSREGS_H
 
+#include <linux/autoconf.h>
 #include <linux/linkage.h>
+
+#ifdef CONFIG_CPU_R5900
+#  if !defined(SYNC_AFTER_MTC0_STR)
+#    define SYNC_AFTER_MTC0_STR	"\n\tsync.p\n\t"
+#  endif
+#else
+#  undef SYNC_AFTER_MTC0_STR
+#  define SYNC_AFTER_MTC0_STR
+#endif
 
 /*
  * The following macros are especially useful for __asm__
@@ -97,6 +108,8 @@
 #define PL_4M   22
 #define PL_16M  24
 
+#ifdef __KERNEL__
+
 /*
  * Macros to access the system control coprocessor
  */
@@ -121,15 +134,20 @@
 
 #define write_32bit_cp0_register(register,value)                \
         __asm__ __volatile__(                                   \
-        "mtc0\t%0,"STR(register)                                \
+        "mtc0\t%0,"STR(register)				\
+	SYNC_AFTER_MTC0_STR					\
         : : "r" (value));
 
 #define write_64bit_cp0_register(register,value)                \
         __asm__ __volatile__(                                   \
         ".set\tmips3\n\t"                                       \
-        "dmtc0\t%0,"STR(register)"\n\t"                         \
+        "dmtc0\t%0,"STR(register)"\n\t"				\
+	SYNC_AFTER_MTC0_STR					\
         ".set\tmips0"                                           \
         : : "r" (value))
+
+#endif /* __KERNEL__ */
+
 /*
  * R4x00 interrupt enable / cause bits
  */
@@ -154,6 +172,7 @@
 #define C_IRQ4          (1<<14)
 #define C_IRQ5          (1<<15)
 
+#ifdef __KERNEL__
 #ifndef _LANGUAGE_ASSEMBLY
 /*
  * Manipulate the status register.
@@ -179,6 +198,7 @@ __BUILD_SET_CP0(cause,CP0_CAUSE)
 __BUILD_SET_CP0(config,CP0_CONFIG)
 
 #endif /* defined (_LANGUAGE_ASSEMBLY) */
+#endif /* __KERNEL__ */
 
 /*
  * Inline code for use of the ll and sc instructions
@@ -233,11 +253,12 @@ __BUILD_SET_CP0(config,CP0_CONFIG)
 /*
  * Bitfields in the R[23]000 cp0 status register.
  */
-#define ST0_KUC			0x00000001
-#define ST0_IEP			0x00000002
-#define ST0_KUP			0x00000004
-#define ST0_IEO			0x00000008
-#define ST0_KUO			0x00000010
+#define ST0_IEC                 0x00000001
+#define ST0_KUC			0x00000002
+#define ST0_IEP			0x00000004
+#define ST0_KUP			0x00000008
+#define ST0_IEO			0x00000010
+#define ST0_KUO			0x00000020
 /* bits 6 & 7 are reserved on R[23]000 */
 
 /*
@@ -330,6 +351,21 @@ __BUILD_SET_CP0(config,CP0_CONFIG)
 #define CONF_SC				(1 << 17)
 
 /*
+ * R5900-specific bits in the coprosessor 0 config register.
+ *
+ *  BPE: Branch prediction enable
+ *  NBE: Non blocking load enable
+ *  DCE: Data cache enable
+ *  ICE: Inst. cache enable
+ *  DIE: Double issue enable
+ */
+#define CONF_R5900_BPE		(1 << 12)
+#define CONF_R5900_NBE		(1 << 13)
+#define CONF_R5900_DCE		(1 << 16)
+#define CONF_R5900_ICE		(1 << 17)
+#define CONF_R5900_DIE		(1 << 18)
+
+/*
  * R10000 performance counter definitions.
  *
  * FIXME: The R10000 performance counter opens a nice way to implement CPU
@@ -385,6 +421,7 @@ __BUILD_SET_CP0(config,CP0_CONFIG)
 #define CEB_KERNEL	2	/* Count events in kernel mode EXL = ERL = 0 */
 #define CEB_EXL		1	/* Count events with EXL = 1, ERL = 0 */
 
+#ifdef __KERNEL__
 #ifndef _LANGUAGE_ASSEMBLY
 /*
  * Functions to access the performance counter and control registers
@@ -393,6 +430,7 @@ extern asmlinkage unsigned int read_perf_cntr(unsigned int counter);
 extern asmlinkage void write_perf_cntr(unsigned int counter, unsigned int val);
 extern asmlinkage unsigned int read_perf_cntl(unsigned int counter);
 extern asmlinkage void write_perf_cntl(unsigned int counter, unsigned int val);
-#endif
+#endif /* _LANGUAGE_ASSEMBLY */
+#endif /* __KERNEL__ */
 
 #endif /* __ASM_MIPS_MIPSREGS_H */

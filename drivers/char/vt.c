@@ -88,7 +88,8 @@ unsigned int video_scan_lines;
  * comments - KDMKTONE doesn't put the process to sleep.
  */
 
-#if defined(__i386__) || defined(__alpha__) || defined(__powerpc__) || defined(__mips__)
+#if defined(__i386__) || defined(__alpha__) || defined(__powerpc__)
+    || (defined(__mips__) && !defined(CONFIG_SGI) && !defined(CONFIG_PS2))
 
 static void
 kd_nosound(unsigned long ignored)
@@ -517,10 +518,13 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		/*
 		 * explicitly blank/unblank the screen if switching modes
 		 */
-		if (arg == KD_TEXT)
+		if (arg == KD_TEXT) {
 			unblank_screen();
-		else
+			/* restore the screen contents */
+			update_screen(fg_console);
+		} else {
 			do_blank_screen(1);
+		}
 		return 0;
 
 	case KDGETMODE:

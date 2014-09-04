@@ -23,6 +23,22 @@ M_OBJS   :=
 L_OBJS   := tty_io.o n_tty.o tty_ioctl.o mem.o random.o
 LX_OBJS  := pty.o misc.o
 
+ifeq ($(CONFIG_PERF_DEV),y)
+LX_OBJS += perf_dev.o
+else
+  ifeq ($(CONFIG_PERF_DEV),m)
+  M_OBJS += perf_dev.o
+  endif
+endif
+
+ifeq ($(CONFIG_MIPS_TST_DEV),y)
+LX_OBJS   += tst_dev.o
+else
+  ifeq ($(CONFIG_MIPS_TST_DEV),m)
+  M_OBJS += tst_dev.o
+  endif
+endif
+
 ifdef CONFIG_VT
 L_OBJS += vt.o vc_screen.o consolemap.o consolemap_deftbl.o
 LX_OBJS += console.o selection.o
@@ -30,17 +46,31 @@ endif
 
 ifeq ($(CONFIG_SERIAL),y)
   ifeq ($(CONFIG_SUN_SERIAL),)
-  LX_OBJS += serial.o
+    ifeq ($(CONFIG_SGI_SERIAL),)
+      ifeq ($(CONFIG_DECSTATION),)
+	ifeq ($(CONFIG_BAGET_MIPS),)
+      LX_OBJS += serial.o
+    endif
+  endif
+    endif
   endif
 else
   ifeq ($(CONFIG_SERIAL),m)
     ifeq ($(CONFIG_SUN_SERIAL),)
-    MX_OBJS += serial.o
+      ifeq ($(CONFIG_SGI_SERIAL),)
+        ifeq ($(CONFIG_DECSTATION),)
+          ifeq ($(CONFIG_BAGET_MIPS),)
+      MX_OBJS += serial.o
+      endif
+    endif
+  endif
     endif
   endif
 endif
 
 ifndef CONFIG_SUN_KEYBOARD
+ifndef CONFIG_DECSTATION
+ifndef CONFIG_BAGET_MIPS
 ifdef CONFIG_VT
 L_OBJS += keyboard.o
 endif
@@ -49,6 +79,8 @@ L_OBJS += pc_keyb.o defkeymap.o
 endif
 ifdef CONFIG_MAGIC_SYSRQ
 L_OBJS += sysrq.o
+endif
+endif
 endif
 endif
 
@@ -332,6 +364,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_VIDEO_VINO),y)
+L_OBJS += vino.o
+else
+  ifeq ($(CONFIG_VIDEO_VINO),m)
+  M_OBJS += vino.o
+  endif
+endif
+
 ifeq ($(CONFIG_RADIO_AZTECH),y)
 L_OBJS += radio-aztech.o
 else
@@ -430,6 +470,14 @@ else
   ALL_SUB_DIRS += hfmodem
   MOD_SUB_DIRS += hfmodem
   endif
+endif
+
+ifeq ($(CONFIG_DZ),y)
+  L_OBJS += dz.o
+endif
+
+ifeq ($(CONFIG_KSYMTAB),m)
+  M_OBJS += ksymtab.o
 endif
 
 include $(TOPDIR)/Rules.make

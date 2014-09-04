@@ -12,10 +12,17 @@
 all:	kernel.o head.o init_task.o
 EXTRA_ASFLAGS = -mips3 -mcpu=r4000
 O_TARGET := kernel.o
-O_OBJS	:= branch.o process.o signal.o entry.o traps.o ptrace.o vm86.o \
+ifdef CONFIG_PS2
+O_OBJS	:= branch.o process.o signal.o entry.o traps.o ptrace.o \
+	   ioport.o pci.o reset.o setup.o syscall.o sysmips.o ipc.o \
+	   r2300_switch.o r2300_fpu.o scall_o32.o softfp.o \
+	   r4k_misc.o unaligned.o trace.o
+else
+O_OBJS	:= branch.o process.o signal.o entry.o traps.o ptrace.o \
 	   ioport.o pci.o reset.o setup.o syscall.o sysmips.o ipc.o \
 	   r4k_switch.o r4k_misc.o r4k_fpu.o r2300_switch.o r2300_misc.o \
-	   r2300_fpu.o r6000_fpu.o scall_o32.o softfp.o unaligned.o
+	   r2300_fpu.o r6000_fpu.o scall_o32.o softfp.o unaligned.o trace.o
+endif
 OX_OBJS := mips_ksyms.o
 
 ifdef CONFIG_MIPS_FPE_MODULE
@@ -23,10 +30,16 @@ M_OBJS += fpe.o
 endif
 
 #
-# SGI's have very different interrupt/timer hardware.
+# SGIs have very different interrupt/timer hardware.
 #
 ifndef CONFIG_SGI
-O_OBJS += irq.o time.o
+  ifndef CONFIG_DECSTATION
+    ifndef CONFIG_BAGET_MIPS
+      ifndef CONFIG_PS2
+        O_OBJS += irq.o time.o
+      endif
+    endif
+  endif
 endif
 
 #
@@ -48,6 +61,29 @@ endif
 #
 ifdef CONFIG_PROC_FS
 O_OBJS += proc.o
+endif
+
+#
+# perfcouner pc sampling support
+#
+ifdef CONFIG_CPU_R5900
+O_OBJS += r5900_perf.o 
+
+  ifdef CONFIG_PERF_DEV
+    O_OBJS += r5900_pc_ops.o  r5900_ctr_ops.o
+  else
+    ifdef CONFIG_PERF_DEV_MODULE
+      O_OBJS += r5900_pc_ops.o  r5900_ctr_ops.o
+    endif
+  endif
+
+endif
+
+#
+# sysmips R5900 
+#
+ifdef CONFIG_CPU_R5900
+O_OBJS += sys_r5900.o
 endif
 
 #

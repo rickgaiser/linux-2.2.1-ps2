@@ -2,6 +2,8 @@
  *  linux/include/asm-i386/keyboard.h
  *
  *  Created 3 Nov 1996 by Geert Uytterhoeven
+ *
+ * $Id: keyboard.h,v 1.7 1999/02/01 15:51:16 ralf Exp $
  */
 
 /*
@@ -12,6 +14,9 @@
 #define _I386_KEYBOARD_H
 
 #ifdef __KERNEL__
+
+#include <linux/kernel.h>
+#include <asm/io.h>
 
 #define KEYBOARD_IRQ			1
 #define DISABLE_KBD_DURING_INTERRUPTS	0
@@ -37,6 +42,29 @@ extern unsigned char pckbd_sysrq_xlate[128];
 
 #define SYSRQ_KEY 0x54
 
-#endif /* __KERNEL__ */
+/* How to access the keyboard macros on this platform.  */
+#define kbd_read_input() inb(KBD_DATA_REG)
+#define kbd_read_status() inb(KBD_STATUS_REG)
+#define kbd_write_output(val) outb(val, KBD_DATA_REG)
+#define kbd_write_command(val) outb(val, KBD_CNTL_REG)
 
-#endif /* __ASMi386_KEYBOARD_H */
+/* Some stoneage hardware needs delays after some operations.  */
+#define kbd_pause() do { SLOW_DOWN_IO; } while(0)
+
+/* Get the keyboard controller registers (incomplete decode) */
+#define kbd_request_region() request_region(0x60, 16, "keyboard")
+
+#define kbd_request_irq() request_irq(KEYBOARD_IRQ, keyboard_interrupt, 0, \
+                                      "keyboard", NULL);
+
+/*
+ * Machine specific bits for the PS/2 driver
+ */
+
+#define AUX_IRQ 12
+
+#define aux_free_irq(dev_id) free_irq(AUX_IRQ, AUX_DEV)
+request_irq(AUX_IRQ, keyboard_interrupt, SA_SHIRQ, "PS/2 Mouse", AUX_DEV)
+
+#endif /* __KERNEL__ */
+#endif /* __ASM_i386_KEYBOARD_H */

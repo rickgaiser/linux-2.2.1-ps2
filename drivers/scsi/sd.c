@@ -153,7 +153,11 @@ static int sd_open(struct inode * inode, struct file * filp)
 
     while (rscsi_disks[target].device->busy)
         barrier();
-    if(rscsi_disks[target].device->removable) {
+    if(rscsi_disks[target].device->removable
+#ifdef CONFIG_PS2
+	&& !(filp->f_flags & O_NONBLOCK)
+#endif
+    ) {
 	check_disk_change(inode->i_rdev);
 
 	/*

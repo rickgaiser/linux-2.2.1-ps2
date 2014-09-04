@@ -93,6 +93,47 @@
 #define SMART_STATUS		0xda
 #define SMART_AUTO_OFFLINE	0xdb
 
+/* WIN_SETFEATURES sub-commands */
+
+#define SETFEATURES_EN_WCACHE	0x02	/* Enable write cache */
+#define SETFEATURES_XFER	0x03	/* Set transfer mode */
+#	define XFER_UDMA_7	0x47	/* 0100|0111 */
+#	define XFER_UDMA_6	0x46	/* 0100|0110 */
+#	define XFER_UDMA_5	0x45	/* 0100|0101 */
+#	define XFER_UDMA_4	0x44	/* 0100|0100 */
+#	define XFER_UDMA_3	0x43	/* 0100|0011 */
+#	define XFER_UDMA_2	0x42	/* 0100|0010 */
+#	define XFER_UDMA_1	0x41	/* 0100|0001 */
+#	define XFER_UDMA_0	0x40	/* 0100|0000 */
+#	define XFER_MW_DMA_2	0x22	/* 0010|0010 */
+#	define XFER_MW_DMA_1	0x21	/* 0010|0001 */
+#	define XFER_MW_DMA_0	0x20	/* 0010|0000 */
+#	define XFER_SW_DMA_2	0x12	/* 0001|0010 */
+#	define XFER_SW_DMA_1	0x11	/* 0001|0001 */
+#	define XFER_SW_DMA_0	0x10	/* 0001|0000 */
+#	define XFER_PIO_4	0x0C	/* 0000|1100 */
+#	define XFER_PIO_3	0x0B	/* 0000|1011 */
+#	define XFER_PIO_2	0x0A	/* 0000|1010 */
+#	define XFER_PIO_1	0x09	/* 0000|1001 */
+#	define XFER_PIO_0	0x08	/* 0000|1000 */
+#	define XFER_PIO_SLOW	0x00	/* 0000|0000 */
+#define SETFEATURES_DIS_DEFECT	0x04	/* Disable Defect Management */
+#define SETFEATURES_EN_APM	0x05	/* Enable advanced power management */
+#define SETFEATURES_DIS_MSN	0x31	/* Disable Media Status Notification */
+#define SETFEATURES_DIS_RLA	0x55	/* Disable read look-ahead feature */
+#define SETFEATURES_EN_RI	0x5D	/* Enable release interrupt */
+#define SETFEATURES_EN_SI	0x5E	/* Enable SERVICE interrupt */
+#define SETFEATURES_DIS_RPOD	0x66	/* Disable reverting to power on defaults */
+#define SETFEATURES_DIS_WCACHE	0x82	/* Disable write cache */
+#define SETFEATURES_EN_DEFECT	0x84	/* Enable Defect Management */
+#define SETFEATURES_DIS_APM	0x85	/* Disable advanced power management */
+#define SETFEATURES_EN_MSN	0x95	/* Enable Media Status Notification */
+#define SETFEATURES_EN_RLA	0xAA	/* Enable read look-ahead feature */
+#define SETFEATURES_PREFETCH	0xAB	/* Sets drive prefetch value */
+#define SETFEATURES_EN_RPOD	0xCC	/* Enable reverting to power on defaults */
+#define SETFEATURES_DIS_RI	0xDD	/* Disable release interrupt */
+#define SETFEATURES_DIS_SI	0xDE	/* Disable SERVICE interrupt */
+
 /* WIN_SECURITY sub-commands */
 #define SECURITY_SET_PASSWORD		0xBA	/* 0xF1 */
 #define SECURITY_UNLOCK			0xBB	/* 0xF2 */
@@ -194,25 +235,25 @@ struct hd_driveid {
 	unsigned short  word72;
 	unsigned short  word73;
 	unsigned short  word74;
-	unsigned short  word75;
+	unsigned short  queue_depth;	/*  */
 	unsigned short  word76;
 	unsigned short  word77;
 	unsigned short  word78;
 	unsigned short  word79;
-	unsigned short  word80;
-	unsigned short  word81;
+	unsigned short  major_rev_num;	/*  */
+	unsigned short  minor_rev_num;	/*  */
 	unsigned short  command_sets;	/* bits 0:Smart 1:Security 2:Removable 3:PM */
-	unsigned short  word83;		/* bits 14:Smart Enabled 13:0 zero */
-	unsigned short  word84;
-	unsigned short  word85;
-	unsigned short  word86;
-	unsigned short  word87;
+	unsigned short  command_set_2;	/* bits 14:Smart Enabled 13:0 zero */
+	unsigned short  cfsse;		/* command set-feature supported extensions */
+	unsigned short  cfs_enable_1;	/* command set-feature enabled */
+	unsigned short  cfs_enable_2;	/* command set-feature enabled */
+	unsigned short  csf_default;	/* command set-feature default */
 	unsigned short  dma_ultra;
 	unsigned short	word89;		/* reserved (word 89) */
 	unsigned short	word90;		/* reserved (word 90) */
-	unsigned short	word91;		/* reserved (word 91) */
+	unsigned short	CurAPMvalues;	/* current APM values */
 	unsigned short	word92;		/* reserved (word 92) */
-	unsigned short	word93;		/* reserved (word 93) */
+	unsigned short	hw_config;	/* hardware config */
 	unsigned short	word94;		/* reserved (word 94) */
 	unsigned short	word95;		/* reserved (word 95) */
 	unsigned short	word96;		/* reserved (word 96) */
@@ -245,7 +286,7 @@ struct hd_driveid {
 	unsigned short	word123;	/* reserved (word 123) */
 	unsigned short	word124;	/* reserved (word 124) */
 	unsigned short	word125;	/* reserved (word 125) */
-	unsigned short	word126;	/* reserved (word 126) */
+	unsigned short	last_lun;	/* reserved (word 126) */
 	unsigned short	word127;	/* reserved (word 127) */
 	unsigned short	security;	/* bits 0:support 1:enabled 2:locked 3:frozen */
 	unsigned short	reserved[127];

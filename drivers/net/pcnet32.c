@@ -33,6 +33,11 @@ static const char *version = "pcnet32.c:v1.11 17.1.99 tsbogend@alpha.franken.de\
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <asm/bitops.h>
+#ifdef __mips__
+#include <asm/bootinfo.h>
+#include <asm/pgtable.h>
+#include <asm/sni.h>
+#endif /* __mips__ */
 #include <asm/io.h>
 #include <asm/dma.h>
 
@@ -248,6 +253,11 @@ __initfunc(int pcnet32_probe (struct device *dev))
 		pci_command |= PCI_COMMAND_MASTER|PCI_COMMAND_IO;
 		pci_write_config_word(pdev, PCI_COMMAND, pci_command);
 	    }
+#ifdef CONFIG_SNI_RM200_PCI
+	    if (mips_machgroup == MACH_GROUP_SNI_RM
+                && mips_machtype == MACH_SNI_RM200_PCI)
+	        irq_line = PCIMT_IRQ_ETHERNET;
+#endif
 	    
 	    printk("Found PCnet/PCI at %#x, irq %d.\n",
 		   ioaddr, irq_line);
@@ -347,6 +357,16 @@ __initfunc(static int pcnet32_probe1(struct device *dev, unsigned int ioaddr, un
     
     /* Make certain the data structures used by the PCnet32 are 16byte aligned and DMAble. */
     lp = (struct pcnet32_private *) (((unsigned long)kmalloc(sizeof(*lp)+15, GFP_DMA | GFP_KERNEL)+15) & ~15);
+    dma_cache_inv(lp, sizeof(*lp)+15);
+#ifdef __mips__
+    /* XXX Maybe modify kmalloc() to return KSEG1 memory?  This would
+     * make lots of modifications to drivers unnecessary but possibly
+     * have negative impact on the performance due to drivers not being
+     * aware of the CPU performance impact of GFP_DMA memory.  It also
+     * adds a bit of extra overhead to kmalloc().
+     */
+    lp = KSEG1ADDR(lp);
+#endif
       
     memset(lp, 0, sizeof(*lp));
     dev->priv = lp;
@@ -684,6 +704,9 @@ pcnet32_start_xmit(struct sk_buff *skb, struct device *dev)
 	lp->tx_ring[entry].base = (u32)le32_to_cpu(virt_to_bus(skb->data));
         lp->tx_ring[entry].status = le16_to_cpu(0x8300);
 
+	dma_cache_wback_inv((void *)skb->data,
+	                    (skb->len < ETH_ZLEN) ? ETH_ZLEN : skb->len);
+
 	lp->cur_tx++;
         lp->stats.tx_bytes += skb->len;
 
@@ -914,6 +937,7 @@ pcnet32_rx(struct device *dev)
 			    lp->stats.rx_bytes += skb->len;
 			    skb->protocol=eth_type_trans(skb,dev);
 			    netif_rx(skb);
+			    dma_cache_inv(bus_to_virt(le32_to_cpu(lp->rx_ring[entry].base)), pkt_len);
 			    lp->stats.rx_packets++;
 			}
 		}

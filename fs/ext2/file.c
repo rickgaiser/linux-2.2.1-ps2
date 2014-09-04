@@ -181,7 +181,7 @@ static ssize_t ext2_file_write (struct file * filp, const char * buf,
 
 	if (!S_ISREG(inode->i_mode)) {
 		ext2_warning (sb, "ext2_file_write", "mode = %07o",
-			      inode->i_mode);
+			      (unsigned int) inode->i_mode);
 		return -EINVAL;
 	}
 	remove_suid(inode);

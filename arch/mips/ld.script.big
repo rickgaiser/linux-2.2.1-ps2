@@ -91,10 +91,10 @@ SECTIONS
    *(.dynbss)
    *(.bss)
    *(COMMON)
-  _end = . ;
-  PROVIDE (end = .);
    *(.sbss)
    *(.scommon)
+  _end = . ;
+  PROVIDE (end = .);
   }
   /* These are needed for ELF backends which have not yet been
      converted to the new style linker.  */

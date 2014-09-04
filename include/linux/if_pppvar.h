@@ -64,7 +64,13 @@
 #define NP_IPV6	3		/* Internet Protocol */
 #define NUM_NP	4		/* Number of NPs. */
 
-#define OBUFSIZE	256	/* # chars of output buffering */
+/*
+ *  large OBUFSIZE is needed to get faster transport rate if lower layer
+ * has ability to transport packet at a rate of 10Mbps.
+ *  4KB buffer is enough to put PPP_MTU size packet once to lower layer
+ * from PPP layer.
+ */
+#define OBUFSIZE	4096	/* # chars of output buffering */
 
 /*
  * Structure describing each ppp unit.

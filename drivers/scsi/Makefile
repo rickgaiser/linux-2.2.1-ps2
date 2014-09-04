@@ -387,10 +387,10 @@ else
 endif
 
 ifeq ($(CONFIG_SCSI_SUNESP),y)
-L_OBJS += esp.o
+L_OBJS += esp.o sparc_esp.o
 else
   ifeq ($(CONFIG_SCSI_SUNESP),m)
-  M_OBJS += esp.o
+  M_OBJS += esp.o sparc_esp.o
   endif
 endif
 
@@ -588,6 +588,10 @@ ifeq ($(CONFIG_JAZZ_ESP),y)
 L_OBJS += NCR53C9x.o jazz_esp.o
 endif
 
+ifeq ($(CONFIG_SCSI_DECNCR),y)
+L_OBJS += NCR53C9x.o dec_esp.o
+endif
+
 include $(TOPDIR)/Rules.make
 
 53c8xx_d.h: 53c7,8xx.scr script_asm.pl
@@ -614,7 +618,7 @@ include $(TOPDIR)/Rules.make
 initio.o: ini9100u.c i91uscsi.c
 	$(CC) $(CFLAGS) -c ini9100u.c -o ini9100u.o
 	$(CC) $(CFLAGS) -c i91uscsi.c -o i91uscsi.o
-	$(LD) -r -o initio.o ini9100u.o i91uscsi.o
+	$(LD) $(LD_RFLAG) -r -o initio.o ini9100u.o i91uscsi.o
 	rm -f ini9100u.o i91uscsi.o
 
 megaraid.o: megaraid.c

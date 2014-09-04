@@ -1,4 +1,4 @@
-/* $Id: dma.h,v 1.2 1998/10/19 21:29:10 ralf Exp $
+/* $Id: dma.h,v 1.2 1999/01/04 16:09:21 ralf Exp $
  * linux/include/asm/dma.h: Defines for using and allocating dma channels.
  * Written by Hennus Bergman, 1992.
  * High DMA channel support & info by Hannu Savolainen
@@ -16,6 +16,7 @@
 #include <asm/io.h>			/* need byte IO */
 #include <asm/spinlock.h>		/* And spinlocks */
 #include <linux/delay.h>
+#include <asm/system.h>
 
 
 #ifdef HAVE_REALLY_SLOW_DMA_CONTROLLER
@@ -145,6 +146,7 @@
 #define DMA_MODE_WRITE	0x48	/* memory to I/O, no autoinit, increment, single mode */
 #define DMA_MODE_CASCADE 0xC0   /* pass thru DREQ->HRQ, DACK<-HLDA only */
 
+#define DMA_AUTOINIT	0x10	/* What's this ? */
 
 extern spinlock_t  dma_spin_lock;
 
@@ -175,8 +177,6 @@ static __inline__ void disable_dma(unsigned int dmanr)
 		dma_outb(dmanr | 4,  DMA1_MASK_REG);
 	else
 		dma_outb((dmanr & 3) | 4,  DMA2_MASK_REG);
-	/* I hate voodoo programming but .. */
-	udelay(20);
 }
 
 /* Clear the 'DMA Pointer Flip Flop'.
@@ -299,5 +299,11 @@ static __inline__ int get_dma_residue(unsigned int dmanr)
 /* These are in kernel/dma.c: */
 extern int request_dma(unsigned int dmanr, const char * device_id);	/* reserve a DMA channel */
 extern void free_dma(unsigned int dmanr);	/* release it again */
+
+#ifdef CONFIG_PCI_QUIRKS
+extern int isa_dma_bridge_buggy;
+#else
+#define isa_dma_bridge_buggy 	(0)
+#endif
 
 #endif /* __ASM_MIPS_DMA_H */

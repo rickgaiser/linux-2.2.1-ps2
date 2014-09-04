@@ -24,6 +24,12 @@
 
 #include <linux/module.h>
 
+#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
+#include <linux/lvm.h>
+   int ( *lvm_map_ptr) ( int, kdev_t *, unsigned long *,
+                         unsigned long, int) = NULL;
+#endif
+
 /*
  * The request-struct contains all necessary data
  * to load a nr of sectors into memory
@@ -458,7 +464,12 @@ void make_request(int major,int rw, struct buffer_head * bh)
 	if (!req) {
 		/* MD and loop can't handle plugging without deadlocking */
 		if (major != MD_MAJOR && major != LOOP_MAJOR && 
+#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
+		    major != DDV_MAJOR && major != NBD_MAJOR &&
+                    major != LVM_BLK_MAJOR)
+#else
 		    major != DDV_MAJOR && major != NBD_MAJOR)
+#endif
 			plug_device(blk_dev + major); /* is atomic */
 	} else switch (major) {
 	     case IDE0_MAJOR:	/* same as HD_MAJOR */
@@ -569,6 +580,7 @@ void ll_rw_block(int rw, int nr, struct buffer_head * bh[])
 	int correct_size;
 	struct blk_dev_struct * dev;
 	int i;
+	struct gendisk *gd;
 
 	/* Make sure that the first block contains something reasonable */
 	while (!*bh) {
@@ -608,15 +620,64 @@ void ll_rw_block(int rw, int nr, struct buffer_head * bh[])
 		/* Md remaps blocks now */
 		bh[i]->b_rdev = bh[i]->b_dev;
 		bh[i]->b_rsector=bh[i]->b_blocknr*(bh[i]->b_size >> 9);
+#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
+                major = MAJOR(bh[i]->b_dev);
+                if ( major == LVM_BLK_MAJOR) {
+                   int ret;
+
+                   if ( lvm_map_ptr == NULL) {
+                              printk ( KERN_ERR
+                               "Bad lvm_map_ptr in ll_rw_block\n");
+                      goto sorry;
+                   }
+                   if ( ( ret = ( lvm_map_ptr) ( MINOR ( bh[i]->b_dev),
+                                                 &bh[i]->b_rdev,
+                                                 &bh[i]->b_rsector,
+                                                 bh[i]->b_size >> 9,
+                                                 rw)) != 0) {
+		      printk ( KERN_ERR
+                               "Bad lvm_map in ll_rw_block\n");
+                      goto sorry;
+                   }
+                   /* remap major too ... */
+                   major = MAJOR(bh[i]->b_rdev);
+               }
+#endif
 #ifdef CONFIG_BLK_DEV_MD
 		if (major==MD_MAJOR &&
-		    md_map (MINOR(bh[i]->b_dev), &bh[i]->b_rdev,
+                    /* changed             v   to allow LVM to remap */
+                    md_map (MINOR(bh[i]->b_rdev), &bh[i]->b_rdev,
 			    &bh[i]->b_rsector, bh[i]->b_size >> 9)) {
 		        printk (KERN_ERR
 				"Bad md_map in ll_rw_block\n");
 		        goto sorry;
 		}
 #endif
+		/* device partitioning */
+		if ((gd = blk_dev[MAJOR(bh[i]->b_rdev)].gd)) {
+			kdev_t kdev = bh[i]->b_rdev;
+			int unit = MINOR(kdev) >> gd->minor_shift;
+			struct hd_struct *part = &gd->part[MINOR(kdev)];
+			long rsector = bh[i]->b_rsector;
+
+			if (unit > gd->max_nr ||
+			    rsector >= part->nr_sects) {
+			    	char buf[8];
+
+				printk("%s: bad access: block=%ld\n", disk_name(gd, MINOR(kdev), buf), rsector);
+				goto sorry;	
+			}
+			bh[i]->b_rdev = MKDEV(major, unit << gd->minor_shift);
+			if (part->nr_segs > 1) {
+				/* segmented partition */
+				struct hd_seg_struct *seg;
+				seg = part->hash[rsector / part->hash_unit];
+				while (seg->offset + seg->nr_sects <= rsector)
+					seg++;
+				bh[i]->b_rsector = rsector - seg->offset + seg->start_sect;
+			} else
+			    bh[i]->b_rsector += part->start_sect; /* +sect0 ? */
+		}
 	}
 
 	if ((rw == WRITE || rw == WRITEA) && is_read_only(bh[0]->b_dev)) {
@@ -629,8 +690,10 @@ void ll_rw_block(int rw, int nr, struct buffer_head * bh[])
 		if (bh[i]) {
 			set_bit(BH_Req, &bh[i]->b_state);
 #ifdef CONFIG_BLK_DEV_MD
-			if (MAJOR(bh[i]->b_dev) == MD_MAJOR) {
-				md_make_request(MINOR (bh[i]->b_dev), rw, bh[i]);
+                        /* changed         v  to allow LVM to remap */
+			if (MAJOR(bh[i]->b_rdev) == MD_MAJOR) {
+                                /* changed for LVM to remap     v */
+				md_make_request(MINOR (bh[i]->b_rdev), rw, bh[i]);
 				continue;
 			}
 #endif
@@ -721,6 +784,7 @@ __initfunc(int blk_dev_init(void))
 		dev->plug_tq.sync    = 0;
 		dev->plug_tq.routine = &unplug_device;
 		dev->plug_tq.data    = dev;
+		dev->gd             = NULL;
 	}
 
 	req = all_requests + NR_REQUEST;
@@ -776,8 +840,10 @@ __initfunc(int blk_dev_init(void))
 #ifdef CONFIG_BLK_DEV_FD
 	floppy_init();
 #else
-#if !defined (__mc68000__) && !defined(CONFIG_PMAC) && !defined(__sparc__)\
-    && !defined(CONFIG_APUS)
+#if !defined(CONFIG_SGI) && !defined (__mc68000__) && !defined(CONFIG_PMAC) \
+    && !defined(__sparc__) && !defined(CONFIG_APUS) \
+    && !defined(CONFIG_DECSTATION) && !defined(CONFIG_BAGET_MIPS) \
+    && !defined(CONFIG_PS2)
 	outb_p(0xc, 0x3f2);
 #endif
 #endif
@@ -814,6 +880,9 @@ __initfunc(int blk_dev_init(void))
 #ifdef CONFIG_SJCD
 	sjcd_init();
 #endif CONFIG_SJCD
+#ifdef CONFIG_BLK_DEV_LVM
+	lvm_init();
+#endif
 #ifdef CONFIG_BLK_DEV_MD
 	md_init();
 #endif CONFIG_BLK_DEV_MD

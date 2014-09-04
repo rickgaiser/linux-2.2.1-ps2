@@ -1,10 +1,11 @@
-/* $Id: fault.c,v 1.12 1998/10/19 21:27:37 ralf Exp $
+/* $Id: fault.c,v 1.9 1999/01/04 16:03:53 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
  * Copyright (C) 1995, 1996, 1997, 1998 by Ralf Baechle
+ * Copyright (C) 2000  Sony Computer Entertainment Inc.
  */
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -27,6 +28,10 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+#include <linux/tst_dev.h>
+#endif
+
 #define development_version (LINUX_VERSION_CODE & 0x100)
 
 extern void die(char *, struct pt_regs *, unsigned long write);
@@ -36,7 +41,7 @@ unsigned long asid_cache;
 /*
  * Macro for exception fixup code to access integer registers.
  */
-#define dpf_reg(r) (regs->regs[r])
+#define dpf_reg(r) (get_gpreg(regs, r))
 
 /*
  * This routine handles page faults.  It determines the address,
@@ -92,11 +97,30 @@ good_area:
  * Fix it, but check if it's kernel or user first..
  */
 bad_area:
+#if defined (CONFIG_MIPS_TST_DEV) || defined (CONFIG_MIPS_TST_DEV_MODULE)
+	/* TEST AND SET magic code */
+	if (address == _TST_ACCESS_MAGIC  
+		&& writeaccess && user_mode(regs)) {
+		unsigned long pc;
+		pc =  (unsigned long)regs->cp0_epc;
+		if ( _TST_START_MAGIC <= pc 
+			&& pc < (_TST_START_MAGIC + PAGE_SIZE)){
+
+				regs->cp0_epc = (unsigned long)_TST_START_MAGIC;
+				up(&mm->mmap_sem);
+#if 0
+				printk("do_page_fault() : TST magic\n");
+#endif
+				return;
+		}
+	}
+#endif /*CONFIG_MIPS_TST_DEV*/
 	up(&mm->mmap_sem);
 
 	if (user_mode(regs)) {
 		tsk->tss.cp0_badvaddr = address;
 		tsk->tss.error_code = writeaccess;
+		regs->cp0_badvaddr = address;
 #if 0
 		printk("do_page_fault() #2: sending SIGSEGV to %s for illegal %s\n"
 		       "%08lx (epc == %08lx, ra == %08lx)\n",
@@ -105,6 +129,10 @@ bad_area:
 		       address,
 		       (unsigned long) regs->cp0_epc,
 		       (unsigned long) regs->regs[31]);
+		// XXX 
+		printk("do_page_fault() #2: show_regs \n");
+		show_regs(regs);
+		//
 #endif
 		force_sig(SIGSEGV, tsk);
 		return;
@@ -131,7 +159,7 @@ no_context:
 	 */
 	printk(KERN_ALERT "Unable to handle kernel paging request at virtual "
 	       "address %08lx, epc == %08lx, ra == %08lx\n",
-	       address, regs->cp0_epc, regs->regs[31]);
+	       address, regs->cp0_epc, (unsigned long)regs->regs[31]);
 	die("Oops", regs, writeaccess);
 	do_exit(SIGKILL);
 }

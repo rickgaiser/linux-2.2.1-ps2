@@ -34,12 +34,15 @@
 
 #define PC		1
 #define ATARI	2
+#define PS2		3
 
 /* select machine configuration */
 #if defined(CONFIG_ATARI)
 #define MACH ATARI
 #elif defined(__i386__) /* and others?? */
 #define MACH PC
+#elif defined(CONFIG_T10000)
+#define MACH PS2
 #else
 #error Cannot build nvram driver for this machine configuration.
 #endif
@@ -80,6 +83,20 @@
 
 #endif
 
+#if MACH == PS2
+
+#define CHECK_DRIVER_INIT() 1
+
+#define PS2_CKS_RANGE_START	0
+#define PS2_CKS_RANGE_END	4093
+#define PS2_CKS_LOC			4094
+
+#define	mach_check_checksum	ps2_check_checksum
+#define	mach_set_checksum	ps2_set_checksum
+#define	mach_proc_infos		ps2_proc_infos
+
+#endif
+
 /* Note that *all* calls to CMOS_READ and CMOS_WRITE must be done with
  * interrupts disabled. Due to the index-port/data-port design of the RTC, we
  * don't want two different things trying to get to it at once. (e.g. the
@@ -109,9 +126,13 @@ static int nvram_open_mode;		/* special open modes */
 #define	NVRAM_WRITE		1		/* opened for writing (exclusive) */
 #define	NVRAM_EXCL		2		/* opened with O_EXCL */
 
+#if MACH != PS2
 #define	RTC_FIRST_BYTE		14	/* RTC register number of first NVRAM byte */
 #define	NVRAM_BYTES			50	/* number of NVRAM bytes */
-
+#else	/* MACH == PS2 */
+#define	RTC_FIRST_BYTE		0
+#define	NVRAM_BYTES			4096
+#endif	/* MACH == PS2 */
 
 static int mach_check_checksum( void );
 static void mach_set_checksum( void );
@@ -120,6 +141,8 @@ static int mach_proc_infos( unsigned char *contents, char *buffer, int *len,
 							off_t *begin, off_t offset, int size );
 #endif
 
+
+#if MACH != PS2
 
 /*
  * These are the internal NVRAM access functions, which do NOT disable
@@ -146,6 +169,54 @@ static __inline__ void nvram_set_checksum_int( void )
 {
 	mach_set_checksum();
 }
+
+#else	/* MACH == PS2 */
+
+/*
+ * These are the internal NVRAM access functions, which do NOT disable
+ * interrupts and do not check the checksum. Both tasks are left to higher
+ * level function, so they need to be done only once per syscall.
+ */
+
+static __inline__ unsigned char nvram_read_int( int i )
+{
+	unsigned char save_freq_select;
+	unsigned char result;
+
+	save_freq_select = CMOS_READ(RTC_FREQ_SELECT);
+	CMOS_WRITE(save_freq_select | 0x10, RTC_FREQ_SELECT);
+	CMOS_WRITE(i % 256, 0x50);			/* EXTENDED RAM ADDR-LSB */
+	CMOS_WRITE(i / 256, 0x51);			/* EXTENDED RAM ADDR-MSB */
+	result = CMOS_READ(0x53);			/* EXTENDED RAM DATA PORT */
+	CMOS_WRITE(save_freq_select, RTC_FREQ_SELECT);
+	return(result);
+}
+
+static __inline__ void nvram_write_int( unsigned char c, int i )
+{
+	unsigned char save_freq_select;
+	unsigned char result;
+
+	save_freq_select = CMOS_READ(RTC_FREQ_SELECT);
+	CMOS_WRITE(save_freq_select | 0x10, RTC_FREQ_SELECT);
+	CMOS_WRITE(i % 256, 0x50);			/* EXTENDED RAM ADDR-LSB */
+	CMOS_WRITE(i / 256, 0x51);			/* EXTENDED RAM ADDR-MSB */
+	CMOS_WRITE(c, 0x53);				/* EXTENDED RAM DATA PORT */
+	CMOS_WRITE(save_freq_select, RTC_FREQ_SELECT);
+}
+
+static __inline__ int nvram_check_checksum_int( void )
+{
+	return( mach_check_checksum() );
+}
+
+static __inline__ void nvram_set_checksum_int( void )
+{
+	mach_set_checksum();
+}
+
+#endif	/* MACH == PS2 */
+
 
 #if MACH == ATARI
 
@@ -373,9 +444,8 @@ static int nvram_read_proc( char *buffer, char **start, off_t offset,
 
     if (offset >= begin + len)
 		return( 0 );
-    *start = buffer + (begin - offset);
+    *start = buffer + (offset - begin);
     return( size < begin + len - offset ? size : begin + len - offset );
-	
 }
 
 /* This macro frees the machine specific function from bounds checking and
@@ -693,6 +763,81 @@ static int atari_proc_infos( unsigned char *nvram, char *buffer, int *len,
 #endif
 
 #endif /* MACH == ATARI */
+
+#if MACH == PS2
+
+static int ps2_check_checksum( void )
+{
+	int i;
+	unsigned short sum = 0;
+	
+	for( i = PS2_CKS_RANGE_START; i <= PS2_CKS_RANGE_END; ++i )
+		sum += nvram_read_int( i );
+	return( (sum & 0xffff) ==
+			((nvram_read_int(PS2_CKS_LOC) << 8) |
+			 nvram_read_int(PS2_CKS_LOC+1)) );
+}
+
+static void ps2_set_checksum( void )
+{
+	int i;
+	unsigned short sum = 0;
+	
+	for( i = PS2_CKS_RANGE_START; i <= PS2_CKS_RANGE_END; ++i )
+		sum += nvram_read_int( i );
+	nvram_write_int( sum >> 8, PS2_CKS_LOC );
+	nvram_write_int( sum & 0xff, PS2_CKS_LOC+1 );
+}
+
+#ifdef CONFIG_PROC_FS
+
+static int ps2_proc_infos( unsigned char *nvram, char *buffer, int *len,
+						  off_t *begin, off_t offset, int size )
+{
+	unsigned long flags;
+	int checksum;
+	int i;
+
+	save_flags(flags);
+	cli();
+	checksum = nvram_check_checksum_int();
+	restore_flags(flags);
+	
+	PRINT_PROC( "Checksum status: %svalid\n", checksum ? "" : "not " );
+
+#if 0
+	PRINT_PROC( "NVRAM contents:\n" );
+	for (i = 0; i < NVRAM_BYTES; i++) {
+		if ((i % 16) == 0)
+			PRINT_PROC("%04X: ", i);
+		PRINT_PROC("%02X ", nvram[i]);
+		if ((i % 16) == 15)
+			PRINT_PROC("\n");
+	}
+	PRINT_PROC("\n");
+#else
+	if (checksum) {
+		PRINT_PROC( "NVRAM contents:\n" );
+		i = 0;
+		while (nvram[i] != '\0') {
+			do {
+				if (i >= PS2_CKS_LOC)
+					break;
+				PRINT_PROC("%c", nvram[i++]);
+			} while (nvram[i] != '\0');
+			PRINT_PROC("\n");
+			i++;
+			if (i >= PS2_CKS_LOC)
+				break;
+		}
+	}
+#endif	
+
+	return( 1 );
+}
+#endif
+
+#endif /* MACH == PS2 */
 
 /*
  * Local variables:

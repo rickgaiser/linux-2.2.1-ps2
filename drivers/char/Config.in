@@ -6,8 +6,13 @@ comment 'Character devices'
 
 bool 'Virtual terminal' CONFIG_VT
 if [ "$CONFIG_VT" = "y" ]; then
-  bool 'Support for console on virtual terminal' CONFIG_VT_CONSOLE
+    bool 'Support for console on virtual terminal' CONFIG_VT_CONSOLE
 fi
+
+if [ "$CONFIG_PS2" = "y" ] ; then
+    bool 'Enable PROM PRINTK(for debug)' CONFIG_PROM_PRINTK
+fi
+
 tristate 'Standard/generic (dumb) serial support' CONFIG_SERIAL
 if [ "$CONFIG_SERIAL" = "y" ]; then
    bool '   Support for console on serial port' CONFIG_SERIAL_CONSOLE
@@ -104,6 +109,18 @@ if [ "$CONFIG_ALPHA_BOOK1" = "y" ]; then
   bool 'Tadpole ANA H8 Support'  CONFIG_H8
 fi
 
+if [ "$CONFIG_MODULES" = "y" ]; then
+  dep_tristate 'Enable display kernel symbols on Oops' CONFIG_KSYMTAB m
+fi
+
+if [ "$CONFIG_CPU_R5900" = "y" ]; then
+    tristate 'Enable perf. counter device support' CONFIG_PERF_DEV
+fi
+if [ "$CONFIG_CPU_R3000" = "y"  -o  "$CONFIG_CPU_R5900" = "y" ]; then
+    tristate 'Enable MIPS ISA 1 TEST AND SET device support' CONFIG_MIPS_TST_DEV
+fi
+
+
 mainmenu_option next_comment
 comment 'Video For Linux'
 
@@ -130,8 +147,13 @@ if [ "$CONFIG_VIDEO_DEV" != "n" ]; then
     dep_tristate 'BT848 Video For Linux' CONFIG_VIDEO_BT848 $CONFIG_VIDEO_DEV
   fi
   if [ "$CONFIG_PARPORT" != "n" ]; then
-    dep_tristate 'Quickcam BW Video For Linux' CONFIG_VIDEO_BWQCAM $CONFIG_VIDEO_DEV $CONFIG_PARPORT
-    dep_tristate 'Colour QuickCam Video For Linux (EXPERIMENTAL)' CONFIG_VIDEO_CQCAM $CONFIG_VIDEO_DEV $CONFIG_PARPORT
+    dep_tristate 'Quickcam BW Video For Linux' CONFIG_VIDEO_BWQCAM $CONFIG_VIDEO_DEV
+    dep_tristate 'Colour QuickCam Video For Linux (EXPERIMENTAL)' CONFIG_VIDEO_CQCAM $CONFIG_VIDEO_DEV
+  fi
+  if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+    if [ "$CONFIG_SGI" = "y" ]; then
+      dep_tristate 'SGI Vino Video For Linux (EXPERIMENTAL)' CONFIG_VIDEO_VINO $CONFIG_VIDEO_DEV
+    fi
   fi
   dep_tristate 'Mediavision Pro Movie Studio Video For Linux' CONFIG_VIDEO_PMS $CONFIG_VIDEO_DEV
   dep_tristate 'SAA5249 Teletext processor' CONFIG_VIDEO_SAA5249 $CONFIG_VIDEO_DEV
@@ -162,6 +184,11 @@ tristate 'Ftape (QIC-80/Travan) support' CONFIG_FTAPE
 if [ "$CONFIG_FTAPE" != "n" ]; then
   source drivers/char/ftape/Config.in
 fi
+endmenu
+
+mainmenu_option next_comment
+comment 'test device driver'
+tristate 'test driver support' CONFIG_TESTDEV
 endmenu
 
 endmenu

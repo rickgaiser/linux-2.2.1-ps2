@@ -10,8 +10,14 @@
 #ifndef __ASM_MIPS_BITOPS_H
 #define __ASM_MIPS_BITOPS_H
 
-#include <linux/types.h>
-#include <linux/byteorder/swab.h>		/* sigh ... */
+#include <linux/autoconf.h>
+
+#include <asm/types.h>			/* for __u32 */
+#include <linux/byteorder/swab.h>	/* for __swab32 */
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
 
 #ifdef __KERNEL__
 
@@ -26,11 +32,34 @@
 #define __bi_cli() __cli()
 #define __bi_save_flags(x) __save_flags(x)
 #define __bi_restore_flags(x) __restore_flags(x)
-#else
+
+#else /* __KERNEL__ */
+
+#include <features.h>
+
+#if  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 )
+
+#include <sys/tas.h>
+
+volatile int __asm_bitops_lock;
+
+#define __bi_flags
+#define __bi_cli()
+#define __bi_save_flags(x) \
+	do {\
+		while (_test_and_set ((int*)&__asm_bitops_lock, 1));	\
+	} while (0)
+#define __bi_restore_flags(x)	__asm_bitops_lock=0
+
+#else /*  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 ) */
+
 #define __bi_flags
 #define __bi_cli()
 #define __bi_save_flags(x)
 #define __bi_restore_flags(x)
+
+#endif /*  __GLIBC__ > 2 || ( __GLIBC__ == 2 && __GLIBC_MINOR__ >=2 ) */
+
 #endif /* __KERNEL__ */
 
 /*
@@ -52,8 +81,9 @@ extern __inline__ int find_first_zero_bit (void *addr, unsigned size);
 extern __inline__ int find_next_zero_bit (void * addr, int size, int offset);
 extern __inline__ unsigned long ffz(unsigned long word);
 
-#if (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS4) || (_MIPS_ISA == _MIPS_ISA_MIPS5)
+#if (((_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) || \
+    (_MIPS_ISA == _MIPS_ISA_MIPS4) || (_MIPS_ISA == _MIPS_ISA_MIPS5)) && \
+    ! defined(CONFIG_CPU_R5900))
 
 /*
  * These functions for MIPS ISA > 1 are interrupt and SMP proof and
@@ -143,6 +173,10 @@ extern __inline__ int test_and_change_bit(int nr, void *addr)
 }
 
 #else /* MIPS I */
+
+#ifdef __KERNEL__ 
+#include <asm/mipsregs.h>
+#endif /* __KERNEL__ */
 
 extern __inline__ void set_bit(int nr, void * addr)
 {
@@ -561,5 +595,9 @@ found_middle:
 #define minix_clear_bit(nr,addr) test_and_clear_bit(nr,addr)
 #define minix_test_bit(nr,addr) test_bit(nr,addr)
 #define minix_find_first_zero_bit(addr,size) find_first_zero_bit(addr,size)
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
 
 #endif /* __ASM_MIPS_BITOPS_H */

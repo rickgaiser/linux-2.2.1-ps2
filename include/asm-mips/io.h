@@ -6,6 +6,7 @@
  */
 #undef CONF_SLOWDOWN_IO
 
+#include <linux/config.h>
 #include <asm/mipsconfig.h>
 #include <asm/addrspace.h>
 
@@ -140,18 +141,21 @@ extern inline void iounmap(void *addr)
 /*
  * XXX We need system specific versions of these to handle EISA address bits
  * 24-31 on SNI.
+ * XXX more SNI hacks.
  */
-#define readb(addr) (*(volatile unsigned char *) (isa_slot_offset + (unsigned long)(addr)))
-#define readw(addr) (*(volatile unsigned short *) (isa_slot_offset + (unsigned long)(addr)))
-#define readl(addr) (*(volatile unsigned int *) (isa_slot_offset + (unsigned long)(addr)))
+#define readb(addr) (*(volatile unsigned char *) (0xa0000000 + (unsigned long)(addr)))
+#define readw(addr) (*(volatile unsigned short *) (0xa0000000 + (unsigned long)(addr)))
+#define readl(addr) (*(volatile unsigned int *) (0xa0000000 + (unsigned long)(addr)))
 
-#define writeb(b,addr) (*(volatile unsigned char *) (isa_slot_offset + (unsigned long)(addr)) = (b))
-#define writew(b,addr) (*(volatile unsigned short *) (isa_slot_offset + (unsigned long)(addr)) = (b))
-#define writel(b,addr) (*(volatile unsigned int *) (isa_slot_offset + (unsigned long)(addr)) = (b))
+#define writeb(b,addr) (*(volatile unsigned char *) (0xa0000000 + (unsigned long)(addr)) = (b))
+#define writew(b,addr) (*(volatile unsigned short *) (0xa0000000 + (unsigned long)(addr)) = (b))
+#define writel(b,addr) (*(volatile unsigned int *) (0xa0000000 + (unsigned long)(addr)) = (b))
 
-#define memset_io(a,b,c)	memset((void *)(isa_slot_offset + (unsigned long)a),(b),(c))
-#define memcpy_fromio(a,b,c)	memcpy((a),(void *)(isa_slot_offset + (unsigned long)(b)),(c))
-#define memcpy_toio(a,b,c)	memcpy((void *)(isa_slot_offset + (unsigned long)(a)),(b),(c))
+#define memset_io(a,b,c)	memset((void *)(0xa0000000 + (unsigned long)a),(b),(c))
+#define memcpy_fromio(a,b,c)	memcpy((a),(void *)(0xa0000000 + (unsigned long)(b)),(c))
+#define memcpy_toio(a,b,c)	memcpy((void *)(0xa0000000 + (unsigned long)(a)),(b),(c))
+
+/* END SNI HACKS ... */
 
 /*
  * We don't have csum_partial_copy_fromio() yet, so we cheat here and
@@ -185,6 +189,7 @@ extern inline void __out##s(unsigned int value, unsigned int port) {
 #define __OUT2(m) \
 __asm__ __volatile__ ("s" #m "\t%0,%1(%2)"
 
+#ifndef CONFIG_PS2
 #define __OUT(m,s) \
 __OUT1(s) __OUT2(m) : : "r" (value), "i" (0), "r" (mips_io_port_base+port)); } \
 __OUT1(s##c) __OUT2(m) : : "r" (value), "ir" (port), "r" (mips_io_port_base)); } \
@@ -192,6 +197,16 @@ __OUT1(s##_p) __OUT2(m) : : "r" (value), "i" (0), "r" (mips_io_port_base+port));
 	SLOW_DOWN_IO; } \
 __OUT1(s##c_p) __OUT2(m) : : "r" (value), "ir" (port), "r" (mips_io_port_base)); \
 	SLOW_DOWN_IO; }
+#else
+#define _SYNC_	__asm__ __volatile__ (".set push; .set mips2; sync; .set pop")
+#define __OUT(m,s) \
+__OUT1(s) __OUT2(m) : : "r" (value), "i" (0), "r" (port)); _SYNC_;} \
+__OUT1(s##c) __OUT2(m) : : "r" (value), "i" (0), "r" (port)); _SYNC_;} \
+__OUT1(s##_p) __OUT2(m) : : "r" (value), "i" (0), "r" (port)); \
+	SLOW_DOWN_IO; _SYNC_;} \
+__OUT1(s##c_p) __OUT2(m) : : "r" (value), "i" (0), "r" (port)); \
+	SLOW_DOWN_IO; _SYNC_;}
+#endif
 
 #define __IN1(t,s) \
 extern __inline__ t __in##s(unsigned int port) { t _v;
@@ -202,15 +217,46 @@ extern __inline__ t __in##s(unsigned int port) { t _v;
 #define __IN2(m) \
 __asm__ __volatile__ ("l" #m "\t%0,%1(%2)"
 
+#ifndef CONFIG_PS2
 #define __IN(t,m,s) \
 __IN1(t,s) __IN2(m) : "=r" (_v) : "i" (0), "r" (mips_io_port_base+port)); return _v; } \
 __IN1(t,s##c) __IN2(m) : "=r" (_v) : "ir" (port), "r" (mips_io_port_base)); return _v; } \
 __IN1(t,s##_p) __IN2(m) : "=r" (_v) : "i" (0), "r" (mips_io_port_base+port)); SLOW_DOWN_IO; return _v; } \
 __IN1(t,s##c_p) __IN2(m) : "=r" (_v) : "ir" (port), "r" (mips_io_port_base)); SLOW_DOWN_IO; return _v; }
+#else
+#define __IN(t,m,s) \
+__IN1(t,s) __IN2(m) : "=r" (_v) : "i" (0), "r" (port)); return _v; } \
+__IN1(t,s##c) __IN2(m) : "=r" (_v) : "i" (0), "r" (port)); return _v; } \
+__IN1(t,s##_p) __IN2(m) : "=r" (_v) : "i" (0), "r" (port)); SLOW_DOWN_IO; return _v; } \
+__IN1(t,s##c_p) __IN2(m) : "=r" (_v) : "i" (0), "r" (port)); SLOW_DOWN_IO; return _v; }
+#endif
 
 #define __INS1(s) \
 extern inline void __ins##s(unsigned int port, void * addr, unsigned long count) {
 
+#ifdef CONFIG_CPU_R5900	/* inhibit short loop */
+#define __INS2(m) \
+if (count) \
+__asm__ __volatile__ ( \
+	".set\tnoreorder\n\t" \
+	".set\tnoat\n" \
+     "1:\n\t" \
+	"l" #m "\t$1,%4(%5)\n\t" \
+	"subu\t%1,1\n\t" \
+	"s" #m "\t$1,(%0)\n\t" \
+	"beq\t$0,%1,2f\n\t" \
+	"addiu\t%0,%6\n\t" \
+	"" \
+	"l" #m "\t$1,%4(%5)\n\t" \
+	"subu\t%1,1\n\t" \
+	"s" #m "\t$1,(%0)\n\t" \
+	"bne\t$0,%1,1b\n\t" \
+	"addiu\t%0,%6\n\t" \
+	"" \
+     "2:\n\t" \
+	".set\tat\n\t" \
+	".set\treorder"
+#else
 #define __INS2(m) \
 if (count) \
 __asm__ __volatile__ ( \
@@ -223,7 +269,9 @@ __asm__ __volatile__ ( \
 	"addiu\t%0,%6\n\t" \
 	".set\tat\n\t" \
 	".set\treorder"
+#endif
 
+#ifndef CONFIG_PS2
 #define __INS(m,s,i) \
 __INS1(s) __INS2(m) \
 	: "=r" (addr), "=r" (count) \
@@ -233,10 +281,22 @@ __INS1(s##c) __INS2(m) \
 	: "=r" (addr), "=r" (count) \
 	: "0" (addr), "1" (count), "ir" (port), "r" (mips_io_port_base), "I" (i) \
 	: "$1");}
+#else
+#define __INS(m,s,i) \
+__INS1(s) __INS2(m) \
+	: "=r" (addr), "=r" (count) \
+	: "0" (addr), "1" (count), "i" (0), "r" (port), "I" (i) \
+	: "$1");} \
+__INS1(s##c) __INS2(m) \
+	: "=r" (addr), "=r" (count) \
+	: "0" (addr), "1" (count), "i" (0), "r" (port), "I" (i) \
+	: "$1");}
+#endif
 
 #define __OUTS1(s) \
 extern inline void __outs##s(unsigned int port, const void * addr, unsigned long count) {
 
+#ifndef CONFIG_PS2
 #define __OUTS2(m) \
 if (count) \
 __asm__ __volatile__ ( \
@@ -259,6 +319,31 @@ __OUTS1(s##c) __OUTS2(m) \
 	: "=r" (addr), "=r" (count) \
 	: "0" (addr), "1" (count), "ir" (port), "r" (mips_io_port_base), "I" (i) \
 	: "$1");}
+#else
+#define __OUTS2(m) \
+if (count) \
+__asm__ __volatile__ ( \
+        ".set\tnoreorder\n\t" \
+        ".set\tnoat\n" \
+        "1:\tl" #m "\t$1,(%0)\n\t" \
+        "subu\t%1,1\n\t" \
+        "s" #m "\t$1,%4(%5)\n\t" \
+	".set push; .set mips2; sync; .set pop\n\t" \
+        "bne\t$0,%1,1b\n\t" \
+        "addiu\t%0,%6\n\t" \
+        ".set\tat\n\t" \
+        ".set\treorder"
+
+#define __OUTS(m,s,i) \
+__OUTS1(s) __OUTS2(m) \
+	: "=r" (addr), "=r" (count) \
+	: "0" (addr), "1" (count), "i" (0), "r" (port), "I" (i) \
+	: "$1");} \
+__OUTS1(s##c) __OUTS2(m) \
+	: "=r" (addr), "=r" (count) \
+	: "0" (addr), "1" (count), "i" (0), "r" (port), "I" (i) \
+	: "$1");}
+#endif
 
 __IN(unsigned char,b,b)
 __IN(unsigned short,h,w)
@@ -281,6 +366,7 @@ __OUTS(w,l,4)
  *  - can't use it inside an inline function (it will never be true)
  *  - you don't have to worry about side effects within the __builtin..
  */
+#ifndef CONFIG_PS2
 #define outb(val,port) \
 ((__builtin_constant_p((port)) && (port) < 32768) ? \
 	__outbc((val),(port)) : \
@@ -371,6 +457,30 @@ __OUTS(w,l,4)
 ((__builtin_constant_p((port)) && (port) < 32768) ? \
 	__inslc((port),(addr),(count)) : \
 	__insl((port),(addr),(count)))
+
+#else
+
+#define outb(val,port)		__outb((val),(port))
+#define inb(port)		__inb(port)
+#define outb_p(val,port)	__outb_p((val),(port))
+#define inb_p(port)		__inb_p(port)
+#define outw(val,port)		__outw((val),(port))
+#define inw(port)		__inw(port)
+#define outw_p(val,port)	__outw_p((val),(port))
+#define inw_p(port)		__inw_p(port)
+#define outl(val,port)		__outl((val),(port))
+#define inl(port)		__inl(port)
+#define outl_p(val,port)	__outl_p((val),(port))
+#define inl_p(port)		__inl_p(port)
+
+#define outsb(port,addr,count)	__outsb ((port),(addr),(count))
+#define insb(port,addr,count)	__insb((port),(addr),(count))
+#define outsw(port,addr,count)	__outsw ((port),(addr),(count))
+#define insw(port,addr,count)	__insw((port),(addr),(count))
+#define outsl(port,addr,count)	__outsl ((port),(addr),(count))
+#define insl(port,addr,count)	__insl((port),(addr),(count))
+
+#endif
 
 /*
  * The caches on some architectures aren't dma-coherent and have need to

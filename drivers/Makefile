@@ -8,9 +8,9 @@
 # Note 2! The CFLAGS definitions are now in the main makefile.
 
 SUB_DIRS     := block char net misc sound
-MOD_SUB_DIRS := $(SUB_DIRS)
-ALL_SUB_DIRS := $(SUB_DIRS) pci scsi sbus cdrom isdn pnp \
-				 macintosh video dio zorro fc4
+MOD_SUB_DIRS := $(SUB_DIRS) sbus
+ALL_SUB_DIRS := $(SUB_DIRS) pci sgi scsi cdrom isdn misc pnp \
+				macintosh video dio zorro fc4 usb ps2
 
 ifdef CONFIG_DIO
 SUB_DIRS += dio
@@ -34,6 +34,10 @@ ifdef CONFIG_NUBUS
 SUB_DIRS += nubus
 endif
 
+ifdef CONFIG_TC
+SUB_DIRS += tc
+endif
+
 ifdef CONFIG_VT
 SUB_DIRS += video
 MOD_SUB_DIRS += video
@@ -42,6 +46,20 @@ endif
 ifdef CONFIG_PPC
 SUB_DIRS += macintosh
 MOD_SUB_DIRS += macintosh
+endif
+
+ifeq ($(CONFIG_USB),y)
+SUB_DIRS += usb
+MOD_SUB_DIRS += usb
+else
+  ifeq ($(CONFIG_USB),m)
+  MOD_SUB_DIRS += usb
+  endif
+endif
+
+ifdef CONFIG_SGI
+SUB_DIRS += sgi
+MOD_SUB_DIRS += sgi
 endif
 
 # If CONFIG_SCSI is set, the core of SCSI support will be added to the kernel,
@@ -99,6 +117,11 @@ endif
 ifeq ($(CONFIG_HAMRADIO),y)
   SUB_DIRS += net/hamradio
   MOD_SUB_DIRS += net/hamradio
+endif
+
+ifeq ($(CONFIG_PS2),y)
+SUB_DIRS += ps2
+MOD_SUB_DIRS += ps2
 endif
 
 include $(TOPDIR)/Rules.make

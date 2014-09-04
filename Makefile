@@ -3,7 +3,7 @@ PATCHLEVEL = 2
 SUBLEVEL = 1
 EXTRAVERSION =
 
-ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
+ARCH = mips
 
 .EXPORT_ALL_VARIABLES:
 
@@ -13,21 +13,24 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 TOPDIR	:= $(shell if [ "$$PWD" != "" ]; then echo $$PWD; else pwd; fi)
 
 HPATH   	= $(TOPDIR)/include
-FINDHPATH	= $(HPATH)/asm $(HPATH)/linux $(HPATH)/scsi $(HPATH)/net
 
-HOSTCC  	=gcc
-HOSTCFLAGS	=-Wall -Wstrict-prototypes -O2 -fomit-frame-pointer
+HOSTCC  	= cc
+HOSTCFLAGS	= -O2
 
 CROSS_COMPILE 	=
 
+TARGET_GCC_INCDIR = \
+	$(dir $(shell $(CROSS_COMPILE)gcc -print-libgcc-file-name))include
+
 AS	=$(CROSS_COMPILE)as
 LD	=$(CROSS_COMPILE)ld
-CC	=$(CROSS_COMPILE)gcc -D__KERNEL__ -I$(HPATH)
+CC	=$(CROSS_COMPILE)gcc -D__KERNEL__ -nostdinc -I$(HPATH) -I$(TARGET_GCC_INCDIR)
 CPP	=$(CC) -E
 AR	=$(CROSS_COMPILE)ar
 NM	=$(CROSS_COMPILE)nm
 STRIP	=$(CROSS_COMPILE)strip
-OBJDUMP	=$(CROSS_COMPILE)objdump
+OBJCOPY	=$(CROSS_COMPILE)objcopy
+OBJDUMP =$(CROSS_COMPILE)objdump
 MAKE	=make
 GENKSYMS=/sbin/genksyms
 
@@ -162,6 +165,10 @@ ifdef CONFIG_PNP
 DRIVERS := $(DRIVERS) drivers/pnp/pnp.a
 endif
 
+ifdef CONFIG_SGI
+DRIVERS := $(DRIVERS) drivers/sgi/sgi.a
+endif
+
 ifdef CONFIG_VT
 DRIVERS := $(DRIVERS) drivers/video/video.a
 endif
@@ -174,8 +181,12 @@ ifdef CONFIG_HAMRADIO
 DRIVERS := $(DRIVERS) drivers/net/hamradio/hamradio.a
 endif
 
+ifeq ($(CONFIG_TC),y)
+DRIVERS := $(DRIVERS) drivers/tc/tc.a
+endif
+
 ifeq ($(CONFIG_USB),y)
-DRIVERS := $(DRIVERS) drivers/uusbd/usb.a
+DRIVERS := $(DRIVERS) drivers/usb/usbdrv.o
 endif
 
 ifeq ($(CONFIG_I2O),y)
@@ -184,6 +195,18 @@ endif
 
 ifeq ($(CONFIG_IRDA),y)
 DRIVERS := $(DRIVERS) drivers/net/irda/irda_drivers.a
+endif
+
+ifeq ($(CONFIG_TC),y)
+DRIVERS := $(DRIVERS) drivers/tc/tc.a
+endif
+
+ifeq ($(CONFIG_PS2),y)
+DRIVERS := $(DRIVERS) drivers/ps2/ps2.a
+endif
+
+ifeq ($(CONFIG_T10000),y)
+DRIVERS := $(DRIVERS) drivers/ps2/t10000/t10000.a
 endif
 
 include arch/$(ARCH)/Makefile
@@ -295,7 +318,7 @@ init/main.o: init/main.c
 fs lib mm ipc kernel drivers net: dummy
 	$(MAKE) $(subst $@, _dir_$@, $@)
 
-MODFLAGS = -DMODULE
+MODFLAGS += -DMODULE
 ifdef CONFIG_MODULES
 ifdef CONFIG_MODVERSIONS
 MODFLAGS += -DMODVERSIONS -include $(HPATH)/linux/modversions.h
@@ -386,21 +409,22 @@ mrproper: clean archmrproper
 	rm -rf modules
 
 distclean: mrproper
-	rm -f core `find . \( -name '*.orig' -o -name '*.rej' -o -name '*~' \
-                -o -name '*.bak' -o -name '#*#' -o -name '.*.orig' \
-                -o -name '.*.rej' -o -name '.SUMS' -o -size 0 \) -print` TAGS
+	find . -type f \( -name core -o -name '*.orig' -o -name '*.rej' \
+		-o -name '*~' -o -name '*.bak' -o -name '#*#' \
+		-o -name '.*.orig' -o -name '.*.rej' -o -name '.SUMS' \
+		-o -size 0 -o -name TAGS \) -print | env -i xargs rm -f
 
 backup: mrproper
 	cd .. && tar cf - linux/ | gzip -9 > backup.gz
 	sync
 
 sums:
-	find . -type f -print | sort | xargs sum > .SUMS
+	find . -type f -print | sort | env -i xargs sum > .SUMS
 
 dep-files: scripts/mkdep archdep include/linux/version.h
 	scripts/mkdep init/*.c > .depend
-	scripts/mkdep `find $(FINDHPATH) -follow -name \*.h ! -name modversions.h -print` > .hdepend
-#	set -e; for i in $(SUBDIRS); do $(MAKE) -C $$i fastdep ;done
+	find $(FINDHPATH) -follow -name \*.h ! -name modversions.h -print | env -i PATH="$(PATH)" HPATH="$(HPATH)" xargs scripts/mkdep > .hdepend
+#	set -e; for i in $(SUBDIRS); do $(MAKE) -C $$i fastdep; done
 # let this be made through the fastdep rule in Rules.make
 	$(MAKE) $(patsubst %,_sfdep_%,$(SUBDIRS)) _FASTDEP_ALL_SUB_DIRS="$(SUBDIRS)"
 

@@ -1,4 +1,4 @@
-/* $Id: ide.h,v 1.4 1998/05/08 21:05:26 davem Exp $
+/* $Id: ide.h,v 1.4 1998/06/30 00:23:09 ralf Exp $
  *
  *  linux/include/asm-mips/ide.h
  *
@@ -14,7 +14,13 @@
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
+
+#ifndef CONFIG_PS2
 typedef unsigned short ide_ioreg_t;
+#else
+typedef unsigned long ide_ioreg_t;
+#endif
 
 #ifndef MAX_HWIFS
 #define MAX_HWIFS	6

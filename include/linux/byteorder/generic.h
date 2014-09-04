@@ -123,6 +123,7 @@
 #endif
 
 
+#ifndef _NETINET_IN_H 
 /*
  * Handle ntohl and suches. These have various compatibility
  * issues - like we want to give the prototype even though we
@@ -166,5 +167,6 @@ extern unsigned short int	htons(unsigned short int);
 
 #endif /* OPTIMIZE */
 
+#endif /* _NETINET_IN_H */
 
 #endif /* _LINUX_BYTEORDER_GENERIC_H */

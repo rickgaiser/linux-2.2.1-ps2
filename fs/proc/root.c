@@ -633,6 +633,13 @@ static struct proc_dir_entry proc_root_rtc = {
 	0, &proc_array_inode_operations
 };
 #endif
+#ifdef CONFIG_SGI_DS1286
+static struct proc_dir_entry proc_root_ds1286 = {
+	PROC_RTC, 3, "rtc",
+	S_IFREG | S_IRUGO, 1, 0, 0,
+	0, &proc_array_inode_operations
+};
+#endif
 static struct proc_dir_entry proc_root_locks = {
 	PROC_LOCKS, 5, "locks",
 	S_IFREG | S_IRUGO, 1, 0, 0,
@@ -666,6 +673,13 @@ static struct proc_dir_entry proc_root_ppc_htab = {
 	NULL, NULL,                		/* get_info, fill_inode */
 	NULL,					/* next */
 	NULL, NULL				/* parent, subdir */
+};
+#endif
+#ifdef CONFIG_PS2
+static struct proc_dir_entry proc_root_ps2sysconf = {
+	PROC_PS2SYSCONF, 10, "ps2sysconf",
+	S_IFREG | S_IRUGO, 1, 0, 0,
+	0, &proc_array_inode_operations
 };
 #endif
 
@@ -710,6 +724,9 @@ __initfunc(void proc_root_init(void))
 #ifdef CONFIG_RTC
 	proc_register(&proc_root, &proc_root_rtc);
 #endif
+#ifdef CONFIG_SGI_DS1286
+	proc_register(&proc_root, &proc_root_ds1286);
+#endif
 	proc_register(&proc_root, &proc_root_locks);
 
 	proc_register(&proc_root, &proc_root_mounts);
@@ -728,6 +745,9 @@ __initfunc(void proc_root_init(void))
 	proc_register(&proc_root, &proc_root_stram);
 #endif
 	proc_register(&proc_root, &proc_root_slab);
+#ifdef CONFIG_PS2
+	proc_register(&proc_root, &proc_root_ps2sysconf);
+#endif
 
 	if (prof_shift) {
 		proc_register(&proc_root, &proc_root_profile);

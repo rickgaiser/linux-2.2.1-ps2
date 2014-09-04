@@ -1,10 +1,11 @@
-/* $Id: indy_int.c,v 1.9 1998/05/28 03:18:00 ralf Exp $
+/* $Id: indy_int.c,v 1.12 1999/05/07 22:34:32 ulfc Exp $
  *
  * indy_int.c: Routines for generic manipulation of the INT[23] ASIC
  *             found on INDY workstations..
  *
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  * Copyright (C) 1997, 1998 Ralf Baechle (ralf@gnu.org)
+ * Copyright (C) 1999 Andrew R. Baker (andrewb@uab.edu) - Indigo2 changes
  */
 #include <linux/config.h>
 #include <linux/init.h>
@@ -274,7 +275,7 @@ asmlinkage void do_IRQ(int irq, struct pt_regs * regs)
 	int do_random, cpu;
 
 	cpu = smp_processor_id();
-	irq_enter(cpu, irq);
+	hardirq_enter(cpu);
 	kstat.irqs[0][irq]++;
 
 	printk("Got irq %d, press a key.", irq);
@@ -310,7 +311,7 @@ asmlinkage void do_IRQ(int irq, struct pt_regs * regs)
 			add_interrupt_randomness(irq);
 		__cli();
 	}
-	irq_exit(cpu, irq);
+	hardirq_exit(cpu);
 
 	/* unmasking and bottom half handling is done magically for us. */
 }
@@ -448,10 +449,10 @@ void indy_local0_irqdispatch(struct pt_regs *regs)
 		action = local_irq_action[irq];
 	}
 
-	irq_enter(cpu, irq);
+	hardirq_enter(cpu);
 	kstat.irqs[0][irq + 16]++;
 	action->handler(irq, action->dev_id, regs);
-	irq_exit(cpu, irq);
+	hardirq_exit(cpu);
 }
 
 void indy_local1_irqdispatch(struct pt_regs *regs)
@@ -472,10 +473,10 @@ void indy_local1_irqdispatch(struct pt_regs *regs)
 		irq = lc1msk_to_irqnr[mask];
 		action = local_irq_action[irq];
 	}
-	irq_enter(cpu, irq);
+	hardirq_enter(cpu);
 	kstat.irqs[0][irq + 24]++;
 	action->handler(irq, action->dev_id, regs);
-	irq_exit(cpu, irq);
+	hardirq_exit(cpu);
 }
 
 void indy_buserror_irq(struct pt_regs *regs)
@@ -483,13 +484,13 @@ void indy_buserror_irq(struct pt_regs *regs)
 	int cpu = smp_processor_id();
 	int irq = 6;
 
-	irq_enter(cpu, irq);
+	hardirq_enter(cpu);
 	kstat.irqs[0][irq]++;
 	printk("Got a bus error IRQ, shouldn't happen yet\n");
 	show_regs(regs);
 	printk("Spinning...\n");
 	while(1);
-	irq_exit(cpu, irq);
+	hardirq_exit(cpu);
 }
 
 /* Misc. crap just to keep the kernel linking... */
@@ -563,9 +564,16 @@ __initfunc(void sgint_init(void))
 		}
 	}
 
-	ioc_icontrol = &sgi_i3regs->ints;
-	ioc_timers = &sgi_i3regs->timers;
-	ioc_tclear = &sgi_i3regs->tclear;
+	/* Indy uses an INT3, Indigo2 uses an INT2 */
+	if (sgi_guiness) {
+		ioc_icontrol = &sgi_i3regs->ints;
+		ioc_timers = &sgi_i3regs->timers;
+		ioc_tclear = &sgi_i3regs->tclear;
+	} else {
+		ioc_icontrol = &sgi_i2regs->ints;
+		ioc_timers = &sgi_i2regs->timers;
+		ioc_tclear = &sgi_i2regs->tclear;
+	}
 
 	/* Mask out all interrupts. */
 	ioc_icontrol->imask0 = 0;

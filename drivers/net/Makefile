@@ -9,7 +9,7 @@ ALL_SUB_DIRS := $(SUB_DIRS) hamradio irda
 
 L_TARGET := net.a
 L_OBJS   := auto_irq.o
-M_OBJS   :=
+M_OBJS   := userlink.o
 MOD_LIST_NAME := NET_MODULES
 
 # Need these to keep track of whether the 7990 (LANCE), 8390, PPP and SLHC 
@@ -868,10 +868,26 @@ else
 endif
 
 ifeq ($(CONFIG_MIPS_JAZZ_SONIC),y)
-L_OBJS += sonic.o
+L_OBJS += jazzsonic.o
 else
   ifeq ($(CONFIG_MIPS_JAZZ_SONIC),m)
-    M_OBJS += sonic.o
+  M_OBJS += jazzsonic.o
+  endif
+endif
+
+ifeq ($(CONFIG_BAGETLANCE),y)
+L_OBJS += bagetlance.o
+else
+  ifeq ($(CONFIG_BAGETLANCE),m)
+  M_OBJS += bagetlance.o
+  endif
+endif
+
+ifeq ($(CONFIG_DECLANCE),y)
+L_OBJS += declance.o
+else
+  ifeq ($(CONFIG_DECLANCE),m)
+  M_OBJS += declance.o
   endif
 endif
 
@@ -1058,7 +1074,7 @@ clean:
 	rm -f core *.o *.a *.s
 
 wanpipe.o: $(WANPIPE_OBJS)
-	ld -r -o $@ $(WANPIPE_OBJS)
+	$(LD) $(LD_RFLAG) -r -o $@ $(WANPIPE_OBJS)
 
 rcpci.o: rcpci45.o rclanmtl.o
-	$(LD) -r -o rcpci.o rcpci45.o rclanmtl.o
+	$(LD) $(LD_RFLAG) -r -o rcpci.o rcpci45.o rclanmtl.o

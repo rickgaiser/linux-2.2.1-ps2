@@ -11,6 +11,8 @@
  *  set_serial_info fixed to set the flags, custom divisor, and uart
  * 	type fields.  Fix suggested by Michael K. Johnson 12/12/92.
  *
+ *  Mips JAZZ support by Andreas Busse, andy@waldorf-gmbh.de
+ *
  *  11/95: TIOCMIWAIT, TIOCGICOUNT by Angelo Haritsis <ah@doc.ic.ac.uk>
  *
  *  03/96: Modularised by Angelo Haritsis <ah@doc.ic.ac.uk>
@@ -30,7 +32,7 @@
  *	  Etienne Lorrain <etienne.lorrain@ibm.net>
  *
  *  4/98: Added changes to support the ARM architecture proposed by
- * 	  Russell King
+ *	  Russell King
  *
  * This module exports the following rs232 io functions:
  *
@@ -256,7 +258,12 @@ static inline unsigned int serial_in(struct async_struct *info, int offset)
 	return inb(info->port+1);
     } else
 #endif
-	return inb(info->port + offset);
+#ifdef CONFIG_MIPS_JAZZ      
+    if (info->port >= JAZZ_LOCAL_IO_SPACE)
+        return (*((volatile unsigned char *)info->port + offset));
+    else
+#endif	  
+        return inb(info->port + offset);
 }
 
 static inline unsigned int serial_inp(struct async_struct *info, int offset)
@@ -267,10 +274,15 @@ static inline unsigned int serial_inp(struct async_struct *info, int offset)
 	return inb_p(info->port+1);
     } else
 #endif
+#ifdef CONFIG_MIPS_JAZZ
+    if (info->port >= JAZZ_LOCAL_IO_SPACE)
+        return (*((volatile unsigned char *)info->port + offset));
+    else
+#endif	  
 #ifdef CONFIG_SERIAL_NOPAUSE_IO
-	return inb(info->port + offset);
+        return inb(info->port + offset);
 #else
-	return inb_p(info->port + offset);
+        return inb_p(info->port + offset);
 #endif
 }
 
@@ -280,9 +292,14 @@ static inline void serial_out(struct async_struct *info, int offset, int value)
     if (info->hub6) {
 	outb(info->hub6 - 1 + offset, info->port);
 	outb(value, info->port+1);
-    } else
+    } else 
 #endif
-	outb(value, info->port+offset);
+#ifdef CONFIG_MIPS_JAZZ
+    if (info->port >= JAZZ_LOCAL_IO_SPACE)
+        *((volatile unsigned char *)info->port + offset) = value;
+    else
+#endif	
+        outb(value, info->port+offset);
 }
 
 static inline void serial_outp(struct async_struct *info, int offset,
@@ -294,10 +311,15 @@ static inline void serial_outp(struct async_struct *info, int offset,
 	outb_p(value, info->port+1);
     } else
 #endif
+#ifdef CONFIG_MIPS_JAZZ
+    if (info->port >= JAZZ_LOCAL_IO_SPACE)
+        *((volatile unsigned char *)info->port + offset) = value;
+    else
+#endif	  
 #ifdef CONFIG_SERIAL_NOPAUSE_IO
-	outb(value, info->port+offset);
+        outb(value, info->port+offset);
 #else
-    	outb_p(value, info->port+offset);
+        outb_p(value, info->port+offset);
 #endif
 }
 
@@ -3325,13 +3347,13 @@ void cleanup_module(void)
 /*
  *	Wait for transmitter & holding register to empty
  */
-static inline void wait_for_xmitr(struct serial_state *ser)
+static inline void wait_for_xmitr(struct async_struct *info)
 {
 	int lsr;
 	unsigned int tmout = 1000000;
 
 	do {
-		lsr = inb(ser->port + UART_LSR);
+		lsr = serial_inp(info, UART_LSR);
 		if (--tmout == 0) break;
 	} while ((lsr & BOTH_EMPTY) != BOTH_EMPTY);
 }
@@ -3346,28 +3368,36 @@ static void serial_console_write(struct console *co, const char *s,
 	struct serial_state *ser;
 	int ier;
 	unsigned i;
+	struct async_struct scr_info; /* serial_{in,out} because HUB6 */
 
 	ser = rs_table + co->index;
+	scr_info.magic = SERIAL_MAGIC;
+	scr_info.port = ser->port;
+	scr_info.flags = ser->flags;
+#ifdef CONFIG_HUB6
+	scr_info.hub6 = state->hub6;
+#endif
+
 	/*
 	 *	First save the IER then disable the interrupts
 	 */
-	ier = inb(ser->port + UART_IER);
-	outb(0x00, ser->port + UART_IER);
+	ier = serial_inp(&scr_info, UART_IER);
+	serial_outp(&scr_info, UART_IER, 0x00);
 
 	/*
 	 *	Now, do each character
 	 */
 	for (i = 0; i < count; i++, s++) {
-		wait_for_xmitr(ser);
+		wait_for_xmitr(&scr_info);
 
 		/*
 		 *	Send the character out.
 		 *	If a LF, also do CR...
 		 */
-		outb(*s, ser->port + UART_TX);
+		serial_outp(&scr_info, UART_TX, *s);
 		if (*s == 10) {
-			wait_for_xmitr(ser);
-			outb(13, ser->port + UART_TX);
+			wait_for_xmitr(&scr_info);
+			serial_outp(&scr_info, UART_TX, 13);
 		}
 	}
 
@@ -3375,8 +3405,8 @@ static void serial_console_write(struct console *co, const char *s,
 	 *	Finally, Wait for transmitter & holding register to empty
 	 * 	and restore the IER
 	 */
-	wait_for_xmitr(ser);
-	outb(ier, ser->port + UART_IER);
+	wait_for_xmitr(&scr_info);
+	serial_outp(&scr_info, UART_IER, ier);
 }
 
 /*
@@ -3388,26 +3418,33 @@ static int serial_console_wait_key(struct console *co)
 	int ier;
 	int lsr;
 	int c;
+	struct async_struct scr_info; /* serial_{in,out} because HUB6 */
 
 	ser = rs_table + co->index;
+	scr_info.magic = SERIAL_MAGIC;
+	scr_info.port = ser->port;
+	scr_info.flags = ser->flags;
+#ifdef CONFIG_HUB6
+	scr_info.hub6 = state->hub6;
+#endif
 
 	/*
 	 *	First save the IER then disable the interrupts so
 	 *	that the real driver for the port does not get the
 	 *	character.
 	 */
-	ier = inb(ser->port + UART_IER);
-	outb(0x00, ser->port + UART_IER);
+	ier = serial_inp(&scr_info, UART_IER);
+	serial_outp(&scr_info, UART_IER, 0x00);
 
 	do {
-		lsr = inb(ser->port + UART_LSR);
+		lsr = serial_inp(&scr_info, UART_LSR);
 	} while (!(lsr & UART_LSR_DR));
-	c = inb(ser->port + UART_RX);
+	c = serial_inp(&scr_info, UART_RX);
 
 	/*
 	 *	Restore the interrupts
 	 */
-	outb(ier, ser->port + UART_IER);
+	serial_outp(&scr_info, UART_IER, ier);
 
 	return c;
 }
@@ -3433,6 +3470,7 @@ __initfunc(static int serial_console_setup(struct console *co, char *options))
 	int	cflag = CREAD | HUPCL | CLOCAL;
 	int	quot = 0;
 	char	*s;
+	struct async_struct scr_info; /* serial_{in,out} because HUB6 */
 
 	if (options) {
 		baud = simple_strtoul(options, NULL, 10);
@@ -3496,6 +3534,12 @@ __initfunc(static int serial_console_setup(struct console *co, char *options))
 	 *	Divisor, bytesize and parity
 	 */
 	ser = rs_table + co->index;
+	scr_info.magic = SERIAL_MAGIC;
+	scr_info.port = ser->port;
+	scr_info.flags = ser->flags;
+#ifdef CONFIG_HUB6
+	scr_info.hub6 = state->hub6;
+#endif
 	quot = ser->baud_base / baud;
 	cval = cflag & (CSIZE | CSTOPB);
 #if defined(__powerpc__) || defined(__alpha__)
@@ -3512,17 +3556,17 @@ __initfunc(static int serial_console_setup(struct console *co, char *options))
 	 *	Disable UART interrupts, set DTR and RTS high
 	 *	and set speed.
 	 */
-	outb(cval | UART_LCR_DLAB, ser->port + UART_LCR);	/* set DLAB */
-	outb(quot & 0xff, ser->port + UART_DLL);	/* LS of divisor */
-	outb(quot >> 8, ser->port + UART_DLM);		/* MS of divisor */
-	outb(cval, ser->port + UART_LCR);		/* reset DLAB */
-	outb(0, ser->port + UART_IER);
-	outb(UART_MCR_DTR | UART_MCR_RTS, ser->port + UART_MCR);
+	serial_outp(&scr_info, UART_LCR, cval | UART_LCR_DLAB);	/* set DLAB */
+	serial_outp(&scr_info, UART_DLL, quot & 0xff);	/* LS of divisor */
+	serial_outp(&scr_info, UART_DLM, quot >> 8);	/* MS of divisor */
+	serial_outp(&scr_info, UART_LCR, cval);		/* reset DLAB */
+	serial_outp(&scr_info, UART_IER, 0);
+	serial_outp(&scr_info, UART_MCR, UART_MCR_DTR | UART_MCR_RTS);
 
 	/*
 	 *	If we read 0xff from the LSR, there is no UART here.
 	 */
-	if (inb(ser->port + UART_LSR) == 0xff)
+	if (serial_inp(&scr_info, UART_LSR) == 0xff)
 		return -1;
 	return 0;
 }
@@ -3550,3 +3594,121 @@ __initfunc (long serial_console_init(long kmem_start, long kmem_end))
 	return kmem_start;
 }
 #endif
+
+#ifdef CONFIG_REMOTE_DEBUG
+#undef PRINT_DEBUG_PORT_INFO
+
+/*
+ * This is the interface to the remote debugger stub.
+ * I've put that here to be able to control the serial
+ * device more directly.
+ */
+
+static int initialized = 0;
+
+static int rs_debug_init(struct async_struct *info)
+{
+	int quot;
+
+	autoconfig(info);	/* autoconfigure ttyS0, whatever that is */
+
+#ifdef PRINT_DEBUG_PORT_INFO
+	printk("kgdb debug interface:: tty%02d at 0x%04x", info->line, info->port);
+	switch (info->type) {
+		case PORT_8250:
+			printk(" is a 8250\n");
+			break;
+		case PORT_16450:
+			printk(" is a 16450\n");
+			break;
+		case PORT_16550:
+			printk(" is a 16550\n");
+			break;
+		case PORT_16550A:
+			printk(" is a 16550A\n");
+			break;
+		case PORT_16650:
+			printk(" is a 16650\n");
+			break;
+		default:
+			printk(" is of unknown type -- unusable\n");
+			break;
+	}
+#endif
+	
+	if (info->port == PORT_UNKNOWN)
+		return -1;
+
+	/*
+	 * Clear all interrupts
+	 */
+
+	(void)serial_inp(info, UART_LSR);
+	(void)serial_inp(info, UART_RX);
+	(void)serial_inp(info, UART_IIR);
+	(void)serial_inp(info, UART_MSR);
+
+	/*
+	 * Now, initialize the UART 
+	 */
+	serial_outp(info, UART_LCR, UART_LCR_WLEN8);	/* reset DLAB */
+	if (info->flags & ASYNC_FOURPORT) {
+		info->MCR = UART_MCR_DTR | UART_MCR_RTS;
+		info->MCR_noint = UART_MCR_DTR | UART_MCR_OUT1;
+	} else {
+		info->MCR = UART_MCR_DTR | UART_MCR_RTS | UART_MCR_OUT2;
+		info->MCR_noint = UART_MCR_DTR | UART_MCR_RTS;
+	}
+
+	info->MCR = info->MCR_noint;			/* no interrupts, please */
+	serial_outp(info, UART_MCR, info->MCR);
+	
+	/*
+	 * and set the speed of the serial port
+	 * (currently hardwired to 9600 8N1
+	 */
+
+	quot = info->baud_base / 9600;		/* baud rate is fixed to 9600 */
+	serial_outp(info, UART_LCR, UART_LCR_WLEN8 | UART_LCR_DLAB);	/* set DLAB */
+	serial_outp(info, UART_DLL, quot & 0xff);		/* LS of divisor */
+	serial_outp(info, UART_DLM, quot >> 8);			/* MS of divisor */
+	serial_outp(info, UART_LCR, UART_LCR_WLEN8);		/* reset DLAB */
+
+	return 0;
+}
+
+int putDebugChar(char c)
+{
+	struct async_struct *info = rs_table;
+
+	if (!initialized) { 		/* need to init device first */
+		if (rs_debug_init(info) == 0)
+			initialized = 1;
+		else
+			return 0;
+	}
+
+	while ((serial_inp(info, UART_LSR) & UART_LSR_THRE) == 0)
+		;
+	serial_out(info, UART_TX, c);
+
+	return 1;
+}
+
+char getDebugChar(void)
+{
+	struct async_struct *info = rs_table;
+
+	if (!initialized) { 		/* need to init device first */
+		if (rs_debug_init(info) == 0)
+			initialized = 1;
+		else
+			return 0;
+	}
+	while (!(serial_inp(info, UART_LSR) & 1))
+		;
+
+	return(serial_inp(info, UART_RX));
+}
+
+#endif /* CONFIG_REMOTE_DEBUG */

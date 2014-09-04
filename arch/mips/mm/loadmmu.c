@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
  *
- * $Id: loadmmu.c,v 1.7 1998/03/27 08:53:41 ralf Exp $
+ * $Id: loadmmu.c,v 1.8 1999/04/11 17:13:56 harald Exp $
  */
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -47,6 +47,7 @@ void (*update_mmu_cache)(struct vm_area_struct * vma,
 			 unsigned long address, pte_t pte);
 
 void (*show_regs)(struct pt_regs *);
+void (*show_tlbs)(void);
 
 void (*add_wired_entry)(unsigned long entrylo0, unsigned long entrylo1,
 			unsigned long entryhi, unsigned long pagemask);
@@ -55,17 +56,22 @@ int (*user_mode)(struct pt_regs *);
 
 asmlinkage void (*resume)(void *tsk);
 
+#if !defined(CONFIG_CPU_R5900)
 extern void ld_mmu_r2300(void);
 extern void ld_mmu_r4xx0(void);
 extern void ld_mmu_r6000(void);
 extern void ld_mmu_tfp(void);
 extern void ld_mmu_andes(void);
+#endif
+extern void ld_mmu_r5900(void);
 
 __initfunc(void loadmmu(void))
 {
 	switch(mips_cputype) {
+#if !defined(CONFIG_CPU_R5900)
 	case CPU_R2000:
 	case CPU_R3000:
+	case CPU_R3000A:
 		printk("Loading R[23]00 MMU routines.\n");
 		ld_mmu_r2300();
 		break;
@@ -89,6 +95,13 @@ __initfunc(void loadmmu(void))
 		ld_mmu_r4xx0();
 		break;
 
+#endif
+	case CPU_R5900:
+		printk("Loading R5900 MMU routines.\n");
+		ld_mmu_r5900();
+		break;
+
+#if !defined(CONFIG_CPU_R5900)
 	case CPU_R6000:
 	case CPU_R6000A:
 		printk("Loading R6000 MMU routines.\n");
@@ -105,6 +118,7 @@ __initfunc(void loadmmu(void))
 		ld_mmu_andes();
 		break;
 
+#endif
 	default:
 		/* XXX We need an generic routine in the MIPS port
 		 * XXX to jabber stuff onto the screen on all machines

@@ -16,6 +16,7 @@
 #ifndef	__ASM_ASM_H
 #define	__ASM_ASM_H
 
+#include <linux/autoconf.h>
 #include <asm/sgidefs.h>
 
 #ifndef CAT
@@ -151,6 +152,12 @@ symbol		=	value
 /*
  * MIPS ISA IV/V movn/movz instructions and equivalents for older CPUs.
  */
+#ifdef CONFIG_CPU_R5900 
+#define MOVN(rd,rs,rt)                                  \
+		movn	rd,rs,rt
+#define MOVZ(rd,rs,rt)                                  \
+		movz	rd,rs,rt
+#else /* CONFIG_CPU_R5900 */
 #if _MIPS_ISA == _MIPS_ISA_MIPS1
 #define MOVN(rd,rs,rt)                                  \
 		.set	push;				\
@@ -163,7 +170,7 @@ symbol		=	value
 		.set	push;				\
 		.set	reorder;			\
 		bnez	rt,9f;                          \
-		move	rd,rt;                          \
+		move	rd,rs;                          \
 		.set	pop;				\
 9:
 #endif /* _MIPS_ISA == _MIPS_ISA_MIPS1 */
@@ -189,10 +196,15 @@ symbol		=	value
 #define MOVZ(rd,rs,rt)                                  \
 		movz	rd,rs,rt
 #endif /* (_MIPS_ISA == _MIPS_ISA_MIPS4) || (_MIPS_ISA == _MIPS_ISA_MIPS5) */
+#endif /* CONFIG_CPU_R5900 */
 
 /*
  * Stack alignment
  */
+#ifdef CONFIG_CPU_R5900
+#define ALSZ	15
+#define ALMASK	~15
+#else /* CONFIG_CPU_R5900 */
 #if (_MIPS_ISA == _MIPS_ISA_MIPS1) || (_MIPS_ISA == _MIPS_ISA_MIPS2)
 #define ALSZ	7
 #define ALMASK	~7
@@ -202,6 +214,7 @@ symbol		=	value
 #define ALSZ	15
 #define ALMASK	~15
 #endif
+#endif /* CONFIG_CPU_R5900 */
 
 /*
  * Size of a register

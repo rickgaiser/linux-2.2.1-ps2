@@ -64,6 +64,7 @@
 #ifndef CONFIG_SCSI_NCR53C8XX_NVRAM_DETECT
 #define CONFIG_SCSI_NCR53C8XX_NVRAM_DETECT
 #endif
+#undef CONFIG_SCSI_NCR53C8XX_NVRAM_DETECT	/* XXX */
 
 /*
 **	These options are not tunable from 'make config'
